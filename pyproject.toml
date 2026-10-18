@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "delivery-routing-lab"
+version = "0.1.0"
+description = "Laboratório de roteamento de entregadores: simulador sobre as ruas reais de Itapipoca (CE), baselines clássicos e um modelo próprio medido contra eles. Pedidos, lojas, entregadores e trânsito são sintéticos."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+delivery-lab = "delivery_lab.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/delivery_lab"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
