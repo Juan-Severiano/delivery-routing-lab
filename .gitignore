@@ -1,0 +1,22 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+node_modules/
+web/dist/
+
+# OpenStreetMap (ODbL): baixado por script, nao versionado. Credito: © OpenStreetMap contributors.
+data/raw/
+
+# Saidas geradas, reproduziveis pela semente.
+data/out/
+runs/*/replay*.json
+.env
+
+# JSON do mapa gerado a partir do OSM (ODbL), nao versionado.
+web/public/data/
+
+# Configuracao local do app Claude Code.
+.claude/
