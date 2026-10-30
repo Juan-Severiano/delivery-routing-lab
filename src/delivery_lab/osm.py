@@ -51,15 +51,27 @@ def overpass_query(place: str) -> str:
 
 
 def fetch(place: str, out: Path) -> int:
-    """Baixa as ruas de `place` para `out` e devolve o tamanho em bytes. Um pedido só, sem repetir."""
+    """Baixa as ruas de `place` para `out` e devolve o tamanho em bytes. Um pedido só, sem repetir.
+
+    Escreve num arquivo `.part` e só renomeia se o JSON veio inteiro e sem erro do servidor; uma
+    conexão que cai no meio não deixa em `out` um arquivo pela metade.
+    """
     data = urllib.parse.urlencode({"data": overpass_query(place)}).encode()
     request = urllib.request.Request(OVERPASS_URL, data=data, headers={"User-Agent": USER_AGENT})
     out.parent.mkdir(parents=True, exist_ok=True)
+    part = out.with_name(out.name + ".part")
     size = 0
-    with urllib.request.urlopen(request, timeout=240) as response, out.open("wb") as handle:
-        while chunk := response.read(1 << 20):
-            handle.write(chunk)
-            size += len(chunk)
+    try:
+        with urllib.request.urlopen(request, timeout=240) as response, part.open("wb") as handle:
+            while chunk := response.read(1 << 20):
+                handle.write(chunk)
+                size += len(chunk)
+        remark = json.loads(part.read_text(encoding="utf-8")).get("remark", "")
+        if remark:  # o Overpass responde 200 com resultado parcial e o erro neste campo
+            raise RuntimeError(f"o Overpass respondeu com erro: {remark}")
+        part.replace(out)
+    finally:
+        part.unlink(missing_ok=True)
     return size
 
 
