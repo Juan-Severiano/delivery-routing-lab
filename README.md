@@ -8,7 +8,7 @@ A pergunta que guia o projeto: **quanto um modelo treinado consegue se aproximar
 
 ## Estado
 
-Projeto no **Passo 3** (simulador de frota com o baseline B0). Ainda não há planejador clássico (B1 e B2) nem modelo.
+Projeto no **Passo 4** (planejadores B1 e B2 contra o B0). Ainda não há modelo aprendido.
 
 | | Estado |
 |---|---|
@@ -20,7 +20,8 @@ Projeto no **Passo 3** (simulador de frota com o baseline B0). Ainda não há pl
 | Trânsito escondido, ciclo do pedido, entregadores com turno e mochila, simulador por eventos | feito |
 | Baseline B0 (entregador livre mais próximo, parada mais próxima) e métricas por dia | feito |
 | Replay do dia e mapa com entregadores andando, pedidos em aberto e rota do entregador | feito |
-| Baselines B1 (inserção + 2-opt, tempo livre) e B2 (o mesmo com tempo real, o teto) | não feito |
+| Planejadores B1 (inserção mais barata + 2-opt, sem ver trânsito nem preparo) e B2 (o teto) | feito |
+| Mapa com a escolha da política (B0, B1, B2) e a comparação do dia | feito |
 | Modelos próprios: ETA, preparo, próxima parada (`decide`), aceite de oferta | não feito |
 | Explicação da escolha no mapa | não feito |
 
@@ -92,21 +93,20 @@ Como o mundo é montado:
 
 Um dia simulado por semente: pedidos do Passo 2, entregadores com turno e mochila de 3 pedidos, trânsito escondido e preparo escondido. O B0 é o **piso** da escada: o pedido vai para o entregador **livre** mais próximo (se ninguém está livre, o mais próximo com espaço) e cada entregador faz sempre a parada mais próxima. Distâncias em linha reta. Ele não olha trânsito nem preparo, então manda o entregador no instante em que o pedido nasce e ele espera no restaurante.
 
-Medido com `delivery-lab sim run --days 20` no preset `plataforma` (~5.300 pedidos por dia), mesmos 20 dias para as três frotas, média ± desvio entre dias:
+**Todas as medições deste README são de 20 dias de teste (dias 101 a 120)**, nunca usados para escolher parâmetro. Média ± desvio entre dias, preset `plataforma` (~5.300 pedidos por dia):
 
-| Entregadores | 300 | 400 | 550 |
+| B0 com N entregadores | 300 | 400 | 550 |
 |---|---|---|---|
-| Entregues no prazo (%) | 63,1 ± 3,6 | **77,0 ± 4,2** | 90,0 ± 2,6 |
-| Atraso médio (min) | 16,2 ± 1,5 | 8,6 ± 1,0 | 5,7 ± 0,7 |
-| Atraso P90 (min) | 44,0 ± 4,0 | 15,1 ± 3,9 | 0,9 ± 1,7 |
-| Tempo do pedido, média (min) | 49,1 ± 2,2 | 39,2 ± 1,9 | 34,0 ± 1,4 |
-| Tempo do pedido, P90 (min) | 89,9 ± 3,9 | 64,1 ± 4,0 | 49,6 ± 2,5 |
-| Espera por entregador (min) | 6,5 | 5,0 | 4,9 |
-| Espera no restaurante (min) | 11,5 | 14,3 | 17,4 |
-| Km rodados por pedido | 4,94 | 4,91 | 4,49 |
-| Utilização dos entregadores (%) | 84,1 | 72,5 | 57,5 |
+| Entregues no prazo (%) | 65,2 ± 3,4 | **78,6 ± 4,1** | 91,5 ± 2,7 |
+| Atraso médio (min) | 11,4 ± 1,4 | 3,7 ± 1,0 | 1,0 ± 0,4 |
+| Atraso P90 (min) | 40,1 ± 4,2 | 12,5 ± 4,3 | 0,6 ± 1,2 |
+| Tempo do pedido, média (min) | 44,0 ± 2,1 | 34,1 ± 2,1 | 28,9 ± 1,4 |
+| Tempo do pedido, P90 (min) | 86,4 ± 4,0 | 61,4 ± 4,1 | 47,8 ± 2,6 |
+| Espera no restaurante (min) | 11,7 | 14,5 | 17,6 |
+| Km rodados por pedido | 4,96 | 4,88 | 4,43 |
+| Utilização dos entregadores (%) | 80,1 | 68,7 | 54,3 |
 
-A frota de **400 é a usada nas medições**: com 300 o piso fica saturado (84% de utilização) e com 550 sobra gente; em 400 há folga para um planejador melhorar. Nenhum dos 106.617 pedidos ficou sem entrega. A **espera no restaurante cresce com a frota** (11,5, 14,3, 17,4 min): é o desperdício que o B0 não evita, e é onde o preparo aprendido deve ajudar.
+A frota de **400 é a usada nas medições**: com 300 o piso fica saturado (80% de utilização) e com 550 sobra gente; em 400 há folga para um planejador melhorar. A **espera no restaurante cresce com a frota** (11,7, 14,5, 17,6 min): é o desperdício que o B0 não evita. Pedidos criados quando **nenhum entregador está de turno** são recusados e ficam fora das métricas: 890 dos 106.401 pedidos (0,84%, ~45 por dia, todos de madrugada); os outros 105.511 foram entregues.
 
 Como o dia é montado:
 
@@ -114,29 +114,80 @@ Como o dia é montado:
 - **Tempo real** de cada aresta = tempo livre × `(1 + 1,0 × pico(hora) × centralidade × sensibilidade da classe × chuva)` × ruído por zona de 1 km (AR(1) ao longo das horas) × fator do dia, mais um ruído de 8% por viagem. O pico tem três picos (manhã fraca, almoço, fim de tarde), a centralidade cai com `exp(-distância ao centro / 2,5 km)` e chove em 20% dos dias.
 - **Preparo** de cada pedido: média do restaurante naquela hora (mais lento no pico) × lognormal, mais 10% com chuva.
 - **Prazo prometido** = criado + 10 min + preparo médio esperado + 6 min por km em linha reta restaurante-cliente. É a regra do laboratório; ela afeta o nível de "no prazo" de todos os degraus, não a comparação entre eles.
-- **Turnos:** 25% almoço (11h a 15h), 25% dia todo (11h a 23h), 50% noite (17h30 à 1h), com ±30 min de variação por entregador.
+- **Turnos:** 25% almoço (10h a 14h30), 25% dia todo (10h a 23h), 50% noite (17h30 à 1h), com ±30 min de variação por entregador.
 - Retirada leva 60 s, entrega 60 s, e o pedido conta como entregue 45 s depois da chegada ao cliente.
 
-### Desempenho (e a decisão sobre Go)
+### Desempenho do simulador
 
 Medido neste Mac (Apple Silicon, 16 GB), Python 3.14, sem biblioteca de grafos:
 
 | | |
 |---|---|
 | Caminhos mínimos, 7.288 origens (Dijkstra com `heapq`) | 18,1 s, 2,5 ms por origem (uma vez; 212 MB de tempos e 106 MB de predecessoras em disco) |
-| Um dia simulado, ~5.300 pedidos e 400 entregadores | 0,21 s (~130 mil eventos por segundo) |
+| Um dia simulado com o B0, ~5.300 pedidos e 400 entregadores | 0,23 s (~120 mil eventos por segundo) |
 | O dobro da escala (~10.700 pedidos, 800 entregadores) | 0,46 s |
-| Onde o tempo vai (profile de um dia) | reconstruir caminhos 45%, despacho e atribuição o resto |
 | Mapa: posição dos 400 entregadores + pedidos em aberto por quadro | 0,03 ms |
-
-**Go não se justifica neste passo.** O plano era portar só o que o profile mostrasse lento, e o caminho mínimo e o simulador ficam longe disso. O ponto a medir de novo é o planejador do Passo 4 (inserção + 2-opt a cada decisão).
 
 ### Suposições e limites do Passo 3
 
 - **Todo o trânsito, o preparo, os turnos e o prazo são suposições do laboratório**; nada foi medido em operação real. O modelo vai aprender o que o simulador gera.
 - O tempo real de uma aresta, medido em 20 dias, vai de 0,73 a 2,49 vezes o tempo livre (1% das arestas-hora abaixo de 0,88): o ruído de zona e do dia pode deixá-la mais rápida que o "livre", que é uma referência e não um teto físico.
 - O B0 mede a posição do entregador no fim do trecho em curso, não a posição exata naquele instante.
-- Só um dia (o dia 1) vai para o replay do mapa; as métricas acima são de 20 dias.
+- Só um dia (o dia 101) vai para o replay do mapa; as métricas são de 20 dias.
+
+## Planejadores B1 e B2 (Passo 4)
+
+Os dois usam a mesma máquina: cada entregador tem um plano (as paradas que ainda não começou). Quando um pedido nasce, o planejador testa, para os **40 entregadores elegíveis mais próximos**, todas as posições em que a coleta e a entrega cabem no plano (a entrega depois da coleta, até 3 pedidos) e fica com a que menos piora o custo. Depois o **2-opt** (inverter um trecho do plano) melhora a ordem das paradas daquele entregador. O custo de um plano é a soma, sobre os pedidos dele, do tempo desde a criação até a entrega mais **3 vezes** o atraso sobre o prazo prometido. Os dois também **seguram a saída** do entregador até "chegar quando o pedido fica pronto", e um pedido novo e perto pode entrar antes de uma coleta que ainda está cozinhando.
+
+O que separa os degraus é só o que cada um enxerga:
+
+- **B1** estima tempos pelo tempo livre das ruas e supõe ~12 min de preparo para qualquer restaurante (uma regra de bolso). Não vê trânsito nem a hora real em que o pedido fica pronto.
+- **B2**, o teto, usa o tempo real das arestas na hora e a hora exata em que cada pedido fica pronto. Só não vê o ruído de 8% de cada viagem, sorteado quando ele despacha.
+
+`delivery-lab sim run --policy b0|b1|b2 --days 20 --first-day 101`, 400 entregadores:
+
+| | B0 (piso) | B1 | B2 (teto) |
+|---|---|---|---|
+| Entregues no prazo (%) | 78,6 ± 4,1 | 80,6 ± 3,2 | **93,8 ± 1,8** |
+| Atraso médio (min) | 3,7 ± 1,0 | 2,0 ± 0,4 | 0,4 ± 0,1 |
+| Atraso P90 (min) | 12,5 ± 4,3 | 6,7 ± 1,8 | 0,0 ± 0,0 |
+| Tempo do pedido, média (min) | 34,1 ± 2,1 | 32,8 ± 1,3 | 28,0 ± 1,0 |
+| Tempo do pedido, P90 (min) | 61,4 ± 4,1 | 52,2 ± 2,1 | 45,5 ± 1,8 |
+| Espera no restaurante (min) | 14,5 | 7,1 | 0,5 |
+| Km rodados por pedido | 4,88 | 3,89 | 4,17 |
+| Planejar um pedido (média / P99) | | 0,54 / 1,21 ms | 1,04 / 2,00 ms |
+| Tempo por dia simulado | 0,23 s | 3,15 s | 6,44 s |
+
+A leitura: o B1 já corta a espera no restaurante pela metade e 20% dos km, mas **a taxa no prazo quase não sobe** (+2,0 pontos). O B2 sobe 15,2 pontos sobre o piso. Para dar uma régua de negócio: o B0 com **550 entregadores** (~37% a mais) ainda fica abaixo do B2 com 400 (91,5% contra 93,8%).
+
+### Quanto vale saber cada coisa
+
+Mesmos 20 dias, mesma frota, mesmo planejador; só muda o que ele enxerga:
+
+| | B1 | B1 + preparo real | B1 + trânsito real | B2 (os dois) |
+|---|---|---|---|---|
+| Entregues no prazo (%) | 80,6 ± 3,2 | **92,9 ± 2,2** | 81,2 ± 3,2 | 93,8 ± 1,8 |
+| Atraso P90 (min) | 6,7 | 0,2 | 6,5 | 0,0 |
+| Tempo do pedido, média (min) | 32,8 | 28,4 | 32,6 | 28,0 |
+| Espera no restaurante (min) | 7,1 | 0,2 | 7,6 | 0,5 |
+
+**Saber a hora em que o pedido fica pronto vale quase todo o ganho do teto** (12,3 dos 13,2 pontos); saber o trânsito vale 0,6 ponto. Neste simulador, portanto, o modelo de **preparo** é o que mais pode render, e o ETA tem pouco a ganhar. Isso depende da força do trânsito sintético, que é um parâmetro nosso (o tempo dobra no pico, no centro, numa avenida); com trânsito mais forte o ETA valeria mais.
+
+### O quanto o planejador é bom
+
+- **Contra a força bruta:** em 1.000 instâncias aleatórias de 3 pedidos (cidade de brinquedo em grade, metade com os tempos do B1, metade com os do B2), a inserção mais barata seguida de 2-opt acha o **plano ótimo em 85%** dos casos; em média custa **0,92% a mais**, no pior caso 30%. Reprodutível com `OPTIMALITY_INSTANCES=1000 uv run pytest -s -k close_to_the_optimum`.
+- **Parâmetros afinados só nos dias 1 a 10**, nunca nos 101 a 120. Candidatos: com 10, 20, 40 e 80 o B1 fez 76,7%, 78,2%, 79,2% e 80,0% no prazo, a 0,16, 0,28, 0,53 e 1,06 ms por decisão (medido antes de corrigir os turnos da abertura; a tendência se repetiu depois); fiquei com 40. Regra de bolso do B1: de 600 a 800 s o resultado fica dentro de 0,3 ponto (80,8%, 81,0%, 80,7%), 900 s perde 0,8 e 1.200 s perde 4,8; fiquei com 700 s. Margem de saída: 150 s no B1 (60 s e 300 s deram 0,1 e 0,5 ponto a menos) e 30 s no B2 (de 0 a 90 s ele muda menos de 0,2 ponto). Peso do atraso: 3 (com 1 ou 8 o B2 muda menos de 0,2 ponto).
+
+### Desempenho e a decisão sobre Go
+
+O planejador **é** o gargalo agora: `assign` consome ~90% do tempo do B1 e ~85% do B2 (105.511 decisões em 20 dias; 0,54 e 1,04 ms em média). Mesmo assim, 20 dias de B2 rodam em ~2 minutos, então **Go continua sem justificativa**. A pergunta volta se o Passo 6 precisar de muitas centenas de dias de decisões do B2 como dado de treino; antes de Go, o próximo passo seria vetorizar mais em numpy.
+
+### Suposições e limites do Passo 4
+
+- O B2 é um **teto no sentido de "vê tudo, menos o ruído da viagem"**, não um ótimo: ele usa heurística (inserção + 2-opt, só 40 candidatos) e custo próprio, e o ótimo global não foi calculado.
+- O B2 mede o trânsito na hora em que decide, não na hora em que cada trecho de fato acontece.
+- A regra de bolso do B1 é uma suposição; uma plataforma de verdade teria algo melhor que "12 min para todos", e é exatamente o que o modelo de preparo vai tentar ser.
+- O resultado "preparo vale mais que trânsito" vale para este simulador e para os parâmetros que escolhi.
 
 ## Como rodar
 
@@ -148,7 +199,8 @@ uv run delivery-lab city fetch      # baixa as ruas do Overpass (um pedido, ~7 M
 uv run delivery-lab city build      # grafo + JSON do mapa
 uv run delivery-lab world build     # restaurantes, demanda e JSON do mapa (--preset dev para o pequeno)
 uv run delivery-lab paths build     # caminhos mínimos entre todos os cruzamentos (~20 s, ~320 MB, não versionado)
-uv run delivery-lab sim run --days 20 --render web/public/data/replay.json   # métricas do B0 e replay do dia 1
+uv run delivery-lab sim run --policy b2 --days 20 --first-day 101   # métricas de 20 dias de teste (b0, b1, b2)
+uv run delivery-lab sim run --policy b1 --days 1 --first-day 101 --render-day 101 --render 'web/public/data/replay-{policy}.json'   # replay para o mapa (repita com b0 e b2)
 uv run pytest
 npm --prefix web install
 npm --prefix web run dev            # http://localhost:5173
