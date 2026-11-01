@@ -15,6 +15,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+# Só o treino usa torch, e só como Tensor e autograd. Simulador e inferência rodam sem ele.
+train = ["torch>=2.5"]
 
 [project.scripts]
 delivery-lab = "delivery_lab.cli:main"
