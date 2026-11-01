@@ -29,6 +29,7 @@ export interface ReplayPayload {
     delivered: (number | null)[];
     promised: number[];
     courier: number[];
+    rejected: number[];
   };
   kinds: string[];
 }
@@ -61,14 +62,15 @@ export interface Replay {
     delivered: Float64Array;
     promised: Float64Array;
     courier: Int32Array;
+    rejected: Uint8Array;
   };
 }
 
 const nan = (list: (number | null)[]) => Float64Array.from(list, (v) => (v === null ? NaN : v));
 
-export async function loadReplay(url = "/data/replay.json"): Promise<Replay> {
+export async function loadReplay(url: string): Promise<Replay> {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`não achei ${url} (HTTP ${res.status}). Rode: uv run delivery-lab sim run --render web/public/data/replay.json`);
+  if (!res.ok) throw new Error(`não achei ${url} (HTTP ${res.status}). Rode: uv run delivery-lab sim run --policy b0 --render 'web/public/data/replay-{policy}.json'`);
   const p = (await res.json()) as ReplayPayload;
   const ptr = Int32Array.from(p.legs.ptr);
   const legSeconds = Float32Array.from(p.leg_deciseconds, (d) => d / 10);
@@ -102,6 +104,7 @@ export async function loadReplay(url = "/data/replay.json"): Promise<Replay> {
       delivered: nan(o.delivered),
       promised: Float64Array.from(o.promised),
       courier: Int32Array.from(o.courier),
+      rejected: Uint8Array.from(o.rejected),
     },
   };
 }
@@ -246,7 +249,7 @@ export function openOrders(r: Replay, t: number): { index: number; state: OrderS
   const o = r.order;
   const out: { index: number; state: OrderState }[] = [];
   for (let i = 0; i < o.created.length; i++) {
-    if (o.created[i] > t) continue;
+    if (o.created[i] > t || o.rejected[i] === 1) continue;
     const delivered = o.delivered[i];
     if (!Number.isNaN(delivered) && delivered <= t) continue;
     const late = t > o.promised[i];

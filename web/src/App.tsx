@@ -22,6 +22,25 @@ const int = new Intl.NumberFormat("pt-BR");
 const km = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
 const one = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
 const SPEEDS = [60, 300, 1200];
+type PolicyId = "b0" | "b1" | "b2";
+const POLICIES: PolicyId[] = ["b0", "b1", "b2"];
+const POLICY_INFO: Record<PolicyId, { name: string; role: string; text: string }> = {
+  b0: {
+    name: "B0",
+    role: "piso",
+    text: "Manda o entregador livre mais próximo assim que o pedido nasce e faz sempre a parada mais próxima. Não vê trânsito nem preparo.",
+  },
+  b1: {
+    name: "B1",
+    role: "clássico",
+    text: "Inserção mais barata e 2-opt, com tempo livre das ruas e uma regra de bolso de ~12 min de preparo. Segura a saída até chegar quando o pedido fica pronto.",
+  },
+  b2: {
+    name: "B2",
+    role: "teto",
+    text: "O mesmo planejador, mas vendo o tempo real do trânsito e a hora exata em que cada pedido fica pronto. Só não vê o ruído de cada viagem.",
+  },
+};
 const MODE_LABEL: Record<number, string> = {
   [MODE_OFFLINE]: "fora do turno",
   [MODE_TO_PICKUP]: "a caminho de coletar",
@@ -33,7 +52,8 @@ const MODE_LABEL: Record<number, string> = {
 export function App() {
   const [city, setCity] = useState<City | null>(null);
   const [world, setWorld] = useState<World | null>(null);
-  const [replay, setReplay] = useState<Replay | null>(null);
+  const [replays, setReplays] = useState<Partial<Record<PolicyId, Replay>>>({});
+  const [policy, setPolicy] = useState<PolicyId>("b1");
   const [error, setError] = useState<string | null>(null);
   const [visible, setVisible] = useState<boolean[]>([]);
   const [fit, setFit] = useState<FitRequest>({ target: "focus", nonce: 0 });
@@ -53,7 +73,11 @@ export function App() {
       })
       .catch(fail);
     loadWorld().then(setWorld).catch(fail);
-    loadReplay().then(setReplay).catch(fail);
+    for (const id of POLICIES) {
+      loadReplay(`/data/replay-${id}.json`)
+        .then((r) => setReplays((all) => ({ ...all, [id]: r })))
+        .catch(fail);
+    }
   }, []);
 
   useEffect(() => {
@@ -70,12 +94,21 @@ export function App() {
     return () => cancelAnimationFrame(id);
   }, [playing, speed]);
 
+  const replay = replays[policy] ?? null;
+
   const frame = useMemo(() => {
     if (!replay || !city) return null;
-    buffer.current ??= newFrame(replay.shiftStart.length);
+    if (!buffer.current || buffer.current.mode.length !== replay.shiftStart.length) {
+      buffer.current = newFrame(replay.shiftStart.length);
+    }
     return computeFrame(replay, city, clock, buffer.current);
     // o buffer é reaproveitado; o relógio é o que muda
   }, [replay, city, clock]);
+
+  const choosePolicy = (id: PolicyId) => {
+    setPolicy(id);
+    setSelected(null); // os entregadores de uma política não são os da outra
+  };
 
   const refit = (target: FitRequest["target"]) => setFit((f) => ({ target, nonce: f.nonce + 1 }));
   const toggleRoad = (i: number) => setVisible((v) => v.map((on, k) => (k === i ? !on : on)));
@@ -94,8 +127,6 @@ export function App() {
     if (frame) for (let c = 0; c < frame.mode.length; c++) modes[frame.mode[c]]++;
     return { count, modes, online: frame ? frame.mode.length - modes[MODE_OFFLINE] : 0 };
   }, [replay, clock, frame]);
-
-  const summary = replay?.payload.meta.summary;
 
   return (
     <div className="app">
@@ -185,34 +216,28 @@ export function App() {
           <CourierPanel replay={replay} frame={frame} courier={selected} clock={clock} onClose={() => setSelected(null)} />
         )}
 
-        {replay && summary && (
-          <section aria-labelledby="day-title">
-            <h2 id="day-title">
-              Dia {replay.payload.meta.day} com a política {replay.payload.meta.policy}
-            </h2>
-            <dl className="stats">
-              <div>
-                <dt>No prazo</dt>
-                <dd>{one.format(summary.on_time_pct)}%</dd>
-              </div>
-              <div>
-                <dt>Atraso P90</dt>
-                <dd>{one.format(summary.late_p90_min)} min</dd>
-              </div>
-              <div>
-                <dt>Entrega, média</dt>
-                <dd>{one.format(summary.delivery_mean_min)} min</dd>
-              </div>
-              <div>
-                <dt>Entrega, P90</dt>
-                <dd>{one.format(summary.delivery_p90_min)} min</dd>
-              </div>
-            </dl>
+        {replay && (
+          <section aria-labelledby="policy-title">
+            <h2 id="policy-title">Política de despacho</h2>
+            <div className="speed policies" role="group" aria-label="Política de despacho">
+              {POLICIES.map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={policy === id}
+                  disabled={!replays[id]}
+                  onClick={() => choosePolicy(id)}
+                >
+                  {POLICY_INFO[id].name} <small>{POLICY_INFO[id].role}</small>
+                </button>
+              ))}
+            </div>
+            <p className="note">{POLICY_INFO[policy].text}</p>
+            <PolicyTable replays={replays} current={policy} />
             <p className="note">
-              {int.format(replay.payload.meta.orders)} pedidos, {int.format(replay.payload.meta.couriers)} entregadores,
-              mochila de {replay.payload.meta.capacity}. Utilização {one.format(summary.courier_utilization_pct)}%,{" "}
-              {one.format(summary.km_per_order)} km por pedido. {replay.payload.meta.rain ? "Dia de chuva." : "Dia sem chuva."}{" "}
-              O B0 é o piso: manda o entregador livre mais próximo assim que o pedido nasce, sem saber o preparo.
+              Dia {replay.payload.meta.day}: {int.format(replay.payload.meta.orders)} pedidos,{" "}
+              {int.format(replay.payload.meta.couriers)} entregadores, mochila de {replay.payload.meta.capacity},{" "}
+              {replay.payload.meta.rain ? "com chuva" : "sem chuva"}. Um dia só; as médias de 20 dias estão no README.
             </p>
           </section>
         )}
@@ -373,7 +398,7 @@ export function App() {
         )}
 
         <footer>
-          <p>Passo 3: entregadores andando com o B0. Próximo: o planejador clássico (B1 e B2).</p>
+          <p>Passo 4: planejadores B1 e B2 contra o B0. Próximo: ETA e preparo aprendidos.</p>
         </footer>
       </aside>
 
@@ -454,5 +479,49 @@ function CourierPanel({
         </ul>
       )}
     </section>
+  );
+}
+
+const COMPARE_ROWS: { key: string; label: string; better: "high" | "low"; digits: number }[] = [
+  { key: "on_time_pct", label: "No prazo (%)", better: "high", digits: 1 },
+  { key: "late_p90_min", label: "Atraso P90 (min)", better: "low", digits: 1 },
+  { key: "delivery_mean_min", label: "Pedido, média (min)", better: "low", digits: 1 },
+  { key: "wait_at_restaurant_mean_min", label: "Espera no restaurante (min)", better: "low", digits: 1 },
+  { key: "km_per_order", label: "Km por pedido", better: "low", digits: 2 },
+];
+
+function PolicyTable({ replays, current }: { replays: Partial<Record<PolicyId, Replay>>; current: PolicyId }) {
+  const ids = POLICIES.filter((id) => replays[id]);
+  return (
+    <table className="compare">
+      <thead>
+        <tr>
+          <th scope="col">
+            <span className="sr-only">Métrica</span>
+          </th>
+          {ids.map((id) => (
+            <th key={id} scope="col" className={id === current ? "current" : undefined}>
+              {POLICY_INFO[id].name}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {COMPARE_ROWS.map((row) => {
+          const values = ids.map((id) => replays[id]!.payload.meta.summary[row.key]);
+          const best = row.better === "high" ? Math.max(...values) : Math.min(...values);
+          return (
+            <tr key={row.key}>
+              <th scope="row">{row.label}</th>
+              {ids.map((id, i) => (
+                <td key={id} className={[id === current ? "current" : "", values[i] === best ? "best" : ""].join(" ").trim() || undefined}>
+                  {values[i].toLocaleString("pt-BR", { minimumFractionDigits: row.digits, maximumFractionDigits: row.digits })}
+                </td>
+              ))}
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
   );
 }
