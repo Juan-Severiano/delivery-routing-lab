@@ -8,7 +8,7 @@ A pergunta que guia o projeto: **quanto um modelo treinado consegue se aproximar
 
 ## Estado
 
-Projeto no **Passo 5** (modelos próprios de preparo e ETA dentro do planejador B1+). Falta a decisão da próxima parada (Jev) e a explicação no mapa.
+Projeto no **Passo 6** (o Jev: a próxima parada com probabilidades e a explicação no mapa). Falta a oferta e o aceite.
 
 | | Estado |
 |---|---|
@@ -21,13 +21,14 @@ Projeto no **Passo 5** (modelos próprios de preparo e ETA dentro do planejador 
 | Baseline B0 (entregador livre mais próximo, parada mais próxima) e métricas por dia | feito |
 | Replay do dia e mapa com entregadores andando, pedidos em aberto e rota do entregador | feito |
 | Planejadores B1 (inserção mais barata + 2-opt, sem ver trânsito nem preparo) e B2 (o teto) | feito |
-| Mapa com a escolha da política (B0, B1, B1+, B2) e a comparação do dia | feito |
+| Mapa com a escolha da política (B0, B1, B1+, Jev, B2) e a comparação do dia | feito |
 | Biblioteca própria de treino sobre o autograd (rede, Adam, loop, inferência em numpy) | feito |
 | Modelo de preparo por restaurante e hora, como distribuição calibrada | feito |
 | Modelo de ETA dos trechos | feito |
 | B1+ (B1 com os dois modelos no lugar das regras) | feito |
-| Modelos próprios: próxima parada (`decide`) e aceite de oferta | não feito |
-| Explicação da escolha no mapa | não feito |
+| O Jev: `decide(estado)` com probabilidade por parada, confiança e peso de cada fator | feito |
+| Explicação da escolha no mapa (candidatas, probabilidades, fatores) | feito |
+| Modelo de aceite de oferta | não feito |
 
 ## O que é medido (plano)
 
@@ -254,6 +255,82 @@ Parâmetros afinados **só nos dias 1 a 10**: quantil do preparo (0,5, 0,6 e 0,7
 - O ETA é treinado com trechos do B0; um planejador diferente passa por pares de nós em outra distribuição.
 - O modelo de preparo depende do mundo com que foi treinado (600 restaurantes, semente 7): outro mundo exige treinar de novo (o planejador confere).
 
+## O Jev: a próxima parada com probabilidades (Passo 6)
+
+Quando um entregador fica livre, o Jev escolhe a **próxima parada** entre as candidatas viáveis (coletas pendentes e entregas de pedidos já coletados) e diz por quê. É um contrato, `decide(features, candidatas) -> Decision`, que devolve a probabilidade de cada candidata, a confiança (a probabilidade da escolhida), a margem sobre a segunda e a contribuição de cada fator. Cada pedido contribui com no máximo uma parada viável (a coleta ou a entrega), então com mochila de 3 pedidos há **2 ou 3 candidatas** (média de 2,31).
+
+A pontuação de cada candidata é um modelo próprio e a probabilidade é um softmax entre as candidatas, treinado para **imitar a escolha do B2**, o planejador que vê o preparo e o trânsito verdadeiros. O Jev só usa o que a plataforma enxerga, com o ETA e o preparo aprendidos do Passo 5. Os 9 fatores: tempo até a parada, se é coleta, espera prevista no restaurante, folga até o prazo, idade do pedido, se já está atrasado, distância às outras paradas, pedidos na mochila depois e quanto falta para o pedido ficar pronto.
+
+Dois modelos: um **linear com softmax**, em que a explicação é exata (a contribuição do fator j é `w_j × (z_j da candidata − média das candidatas)`, e a soma dá a pontuação da candidata menos a média), e uma **rede pequena** (32 e 16 unidades), só para comparar. Treinam nas decisões do B2 em dias simulados: 193.190 decisões (dias 21 a 50), validação com 32.524 (dias 61 a 65), teste com **129.013 decisões dos dias 101 a 120**. Coletar os dados custou 369 s de simulação do B2 (55 dias: 30 de treino, 5 de validação e 20 de teste); treinar leva 1 s o linear e 4 s a rede.
+
+### Quanto o Jev acerta o que o B2 faz
+
+Top-1 nas 129.013 decisões de teste (acertar a mesma parada que o B2 escolheu):
+
+| | Acerto |
+|---|---|
+| Sorteio uniforme entre as candidatas | 44,9% |
+| Sempre a parada mais próxima (a regra do B0) | 31,3% |
+| Sempre a de menor folga até o prazo | 47,2% |
+| Planejador re-otimizando agora, com a mesma visão da plataforma | 93,5% |
+| **Jev linear** | **95,3%** |
+| **Jev rede** | **96,5%** |
+
+Os dois Jev ficam acima do planejador que re-otimiza com as mesmas estimativas. Uma explicação plausível, que não testei: imitar o B2 incorpora um pouco do que o preparo e o trânsito verdadeiros mudam, que estimativas pontuais perdem. O acerto é 95,2% com 2 candidatas e 95,7% com 3 (linear).
+
+**Calibração** (linear): a probabilidade que ele dá à escolhida tem erro de calibração esperado de **0,007** (rede: 0,001) e a probabilidade média que ele dá à escolha do B2 é 0,925 (rede: 0,950). Por faixa de confiança, no linear:
+
+| Confiança | Decisões | Confiança média | Acerto |
+|---|---|---|---|
+| 0,3 a 0,5 | 217 | 0,46 | 0,44 |
+| 0,5 a 0,6 | 3.712 | 0,55 | 0,58 |
+| 0,6 a 0,7 | 3.912 | 0,65 | 0,69 |
+| 0,7 a 0,8 | 5.090 | 0,75 | 0,79 |
+| 0,8 a 0,9 | 8.332 | 0,86 | 0,88 |
+| 0,9 a 1,0 | 107.750 | 0,99 | 0,99 |
+
+Ele é um pouco **subconfiante** nas faixas do meio (acerta mais do que diz). 83,5% das decisões têm confiança acima de 0,9: a maioria é fácil.
+
+Os pesos do linear, por desvio padrão de cada fator (todos negativos: a pontuação sobe quando o fator é menor): espera prevista no restaurante -1,79, falta para o pedido ficar pronto -1,35, pedidos na mochila depois -0,90, é uma coleta -0,78, tempo até a parada -0,55, folga até o prazo -0,41, idade do pedido -0,38, já atrasado -0,34 e distância às outras paradas -0,29. Os fatores andam juntos (folga, atraso e idade, por exemplo), então os pesos individuais não se leem sozinhos: no mapa, leia o conjunto.
+
+### O Jev dirigindo a frota
+
+No painel do mapa, ao clicar num entregador, aparecem as candidatas da decisão que gerou o trecho em curso, a probabilidade de cada uma, as barras de quanto cada fator pesou na escolhida (para cima em verde, para baixo em vermelho) e anéis nas paradas candidatas, com o tamanho dado pela probabilidade.
+
+A política **Jev** atribui como o B1+ (inserção mais barata com os modelos aprendidos) e usa o Jev para escolher a próxima parada. Mesmos 20 dias de teste, 400 entregadores (`delivery-lab sim run --policy jev --days 20 --first-day 101`):
+
+| | B1+ | **Jev linear** | Jev rede | B2 (teto) |
+|---|---|---|---|---|
+| Entregues no prazo (%) | 91,2 ± 2,4 | **91,3 ± 2,5** | 91,0 ± 2,5 | 93,8 ± 1,8 |
+| Atraso P90 (min) | 0,4 ± 0,8 | 0,4 ± 0,8 | 0,5 ± 0,9 | 0,0 ± 0,0 |
+| Tempo do pedido, média (min) | 31,2 | 31,3 | 31,3 | 28,0 |
+| Espera no restaurante (min) | 2,1 | 2,1 | 2,1 | 0,5 |
+| Km rodados por pedido | 4,25 | 4,27 | 4,26 | 4,17 |
+
+**O Jev linear empata com o B1+** (diferença de 0,05 ponto, dentro do ruído de 2,5): trocar a sequência do plano pela escolha do Jev não custa nada na frota e dá probabilidades e explicação. **A rede acerta mais as escolhas do B2 (96,5% contra 95,3%), mas fica 0,3 ponto atrás na frota**, também dentro do ruído: a complexidade extra não compensa e ainda perde a explicação exata.
+
+### Velocidade e a decisão sobre Go
+
+- No simulador, uma decisão do Jev (montar as features e pontuar) leva em média **50 µs** (P99 75 µs, 258.285 decisões).
+- **Comparação justa nos mesmos estados** (13.165 decisões, planos de 4 paradas em média, no máximo 6): o planejador re-otimizando agora leva 75 µs (P99 320 µs) e o Jev 51 µs (P99 70 µs). Ou seja, **só 1,5 vez mais rápido na média**: com mochila de 3 pedidos o planejador exaustivo já é rápido, e a promessa de "responder em microssegundos" não é o diferencial aqui.
+- A vantagem aparece quando o plano cresce. Planejar do zero, com todas as paradas, em uma bancada com pedidos aleatórios:
+
+| Pedidos no plano | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|
+| Planejador exaustivo | 0,8 ms | 1,3 ms | 13,8 ms | 1,2 s | 157 s |
+| Jev (features + modelo) | 0,12 ms | 0,07 ms | 0,13 ms | 0,24 ms | 0,87 ms |
+
+  Isto mede só a **latência**: o Jev foi treinado com no máximo 3 candidatas, e a qualidade dele com mais pedidos não foi avaliada.
+- **Go não foi necessário.** Gerar os dados de 55 dias do B2 levou 369 s; o treino leva segundos.
+
+### Suposições e limites do Passo 6
+
+- **O Jev imita o B2, então não passa dele.** O que ele entrega é a explicação, a calibração e uma decisão que não depende de enumerar sequências; o resultado da frota empata com o B1+, não o supera.
+- O acerto de 95% vem em boa parte de decisões fáceis (83,5% com confiança acima de 0,9). O que importa é o empate na frota, que mede a política de verdade, com o Jev dirigindo os próprios estados.
+- A explicação é do **modelo**, não do mundo: diz o que pesou na pontuação do Jev, não o que causaria atraso. Os fatores são correlacionados.
+- Na frota o Jev só decide a sequência; a atribuição de cada pedido continua pela inserção do B1+, e o plano da inserção segue existindo só para avaliar pedidos novos.
+- Treinado e testado só com mochila de 3 pedidos; só o linear tem a explicação exata.
+
 ## Como rodar
 
 Requer [uv](https://docs.astral.sh/uv/) e Node 20.19 ou mais novo.
@@ -266,8 +343,9 @@ uv run delivery-lab world build     # restaurantes, demanda e JSON do mapa (--pr
 uv run delivery-lab paths build     # caminhos mínimos entre todos os cruzamentos (~20 s, ~320 MB, não versionado)
 uv run delivery-lab train prep      # modelo de preparo (7 s) -> models/prep.npz
 uv run delivery-lab train eta       # modelo de ETA (20 s) -> models/eta.npz
+uv run delivery-lab train jev       # o Jev, imitando o B2 (~8 min, a maior parte é simular o B2) -> models/jev-*.npz
 uv run delivery-lab sim run --policy b2 --days 20 --first-day 101   # métricas de 20 dias de teste (b0, b1, b1+, b2)
-uv run delivery-lab sim run --policy b1 --days 1 --first-day 101 --render-day 101 --render 'web/public/data/replay-{policy}.json'   # replay para o mapa (repita com b0, b1+ e b2)
+uv run delivery-lab sim run --policy b1 --days 1 --first-day 101 --render-day 101 --render 'web/public/data/replay-{policy}.json'   # replay para o mapa (repita com b0, b1+, jev e b2)
 uv run pytest
 npm --prefix web install
 npm --prefix web run dev            # http://localhost:5173
