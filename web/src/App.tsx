@@ -22,8 +22,8 @@ const int = new Intl.NumberFormat("pt-BR");
 const km = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
 const one = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
 const SPEEDS = [60, 300, 1200];
-type PolicyId = "b0" | "b1" | "b2";
-const POLICIES: PolicyId[] = ["b0", "b1", "b2"];
+type PolicyId = "b0" | "b1" | "b1plus" | "b2";
+const POLICIES: PolicyId[] = ["b0", "b1", "b1plus", "b2"];
 const POLICY_INFO: Record<PolicyId, { name: string; role: string; text: string }> = {
   b0: {
     name: "B0",
@@ -34,6 +34,11 @@ const POLICY_INFO: Record<PolicyId, { name: string; role: string; text: string }
     name: "B1",
     role: "clássico",
     text: "Inserção mais barata e 2-opt, com tempo livre das ruas e uma regra de bolso de ~12 min de preparo. Segura a saída até chegar quando o pedido fica pronto.",
+  },
+  b1plus: {
+    name: "B1+",
+    role: "aprendido",
+    text: "O B1 com o modelo de preparo e o ETA aprendidos no lugar das regras. Só usa o que a plataforma sabe: restaurante, hora, previsão do tempo e posições.",
   },
   b2: {
     name: "B2",
@@ -53,7 +58,7 @@ export function App() {
   const [city, setCity] = useState<City | null>(null);
   const [world, setWorld] = useState<World | null>(null);
   const [replays, setReplays] = useState<Partial<Record<PolicyId, Replay>>>({});
-  const [policy, setPolicy] = useState<PolicyId>("b1");
+  const [policy, setPolicy] = useState<PolicyId>("b1plus");
   const [error, setError] = useState<string | null>(null);
   const [visible, setVisible] = useState<boolean[]>([]);
   const [fit, setFit] = useState<FitRequest>({ target: "focus", nonce: 0 });
@@ -398,7 +403,7 @@ export function App() {
         )}
 
         <footer>
-          <p>Passo 4: planejadores B1 e B2 contra o B0. Próximo: ETA e preparo aprendidos.</p>
+          <p>Passo 5: modelos próprios de preparo e ETA no B1+. Próximo: o Jev e a explicação da escolha.</p>
         </footer>
       </aside>
 
