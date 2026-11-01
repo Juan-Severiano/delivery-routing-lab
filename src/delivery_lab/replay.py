@@ -14,7 +14,9 @@ from .sim import SimResult, summarize
 from .world import KINDS, World
 
 
-def render_replay(result: SimResult, city: City, world: World, policy: str, day: int) -> dict:
+def render_replay(
+    result: SimResult, city: City, world: World, policy: str, day: int, decisions: list[dict] | None = None
+) -> dict:
     if result.legs is None:
         raise ValueError("rode a simulação com record=True para ter os trechos")
     n_couriers = len(result.fleet)
@@ -23,8 +25,10 @@ def render_replay(result: SimResult, city: City, world: World, policy: str, day:
     flat_edges: list[int] = []
     flat_ds: list[int] = []
     courier_first = [0]
-    for legs in result.legs:
+    leg_index: dict[tuple[int, float], int] = {}
+    for c, legs in enumerate(result.legs):
         for leg in legs:
+            leg_index[(c, round(leg.t0, 1))] = len(leg_t0)
             leg_t0.append(round(leg.t0, 1))
             leg_kind.append(leg.kind)
             leg_order.append(leg.order)
@@ -34,6 +38,7 @@ def render_replay(result: SimResult, city: City, world: World, policy: str, day:
         courier_first.append(len(leg_t0))
 
     start_xy = np.round(city.node_xy[result.fleet.start_node], 1)
+    payload_decisions = _decisions(decisions, leg_index) if decisions else None
     o = result.orders
     r = o.restaurant
     return {
@@ -74,8 +79,35 @@ def render_replay(result: SimResult, city: City, world: World, policy: str, day:
             "rejected": result.rejected.astype(int).tolist(),
         },
         "kinds": [k.name for k in KINDS],
+        **({"decisions": payload_decisions} if payload_decisions else {}),
     }
 
 
 def _nullable(values: np.ndarray) -> list[float | None]:
     return [None if np.isnan(v) else round(float(v), 1) for v in values]
+
+
+def _decisions(decisions: list[dict], leg_index: dict[tuple[int, float], int]) -> dict:
+    """As decisões do Jev em colunas: para cada trecho que nasceu de uma escolha, as candidatas e o porquê."""
+    from .learn.jev import FEATURE_LABELS, FEATURES
+
+    leg, chosen, ptr = [], [], [0]
+    kind, order, prob, contrib = [], [], [], []
+    for item in decisions:
+        key = (item["courier"], round(item["t"], 1))
+        if key not in leg_index:
+            continue
+        d = item["decision"]
+        leg.append(leg_index[key])
+        chosen.append(d.chosen)
+        for i, (k, o) in enumerate(d.candidates):
+            kind.append(k)
+            order.append(o)
+            prob.append(round(float(d.probabilities[i]), 3))
+            if d.contributions is not None:
+                contrib.append([round(float(v), 2) for v in d.contributions[i]])
+        ptr.append(len(kind))
+    return {
+        "leg": leg, "chosen": chosen, "ptr": ptr, "kind": kind, "order": order, "prob": prob,
+        "contrib": contrib, "factors": list(FEATURES), "labels": [FEATURE_LABELS[f] for f in FEATURES],
+    }

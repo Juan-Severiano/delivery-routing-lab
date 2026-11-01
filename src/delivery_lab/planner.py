@@ -23,6 +23,7 @@ espera, o plano pode mudar (um pedido novo e perto entra antes da coleta).
 
 from __future__ import annotations
 
+import itertools
 import time
 
 import numpy as np
@@ -226,13 +227,37 @@ class Planner:
         plan = self.plan[courier]
         if not plan:
             return None
-        kind, o = plan[0]
+        return self.with_departure(sim, courier, plan[0])
+
+    def with_departure(self, sim: Sim, courier: int, stop: Stop) -> tuple[int, int, float]:
+        """A parada com a hora mais cedo de saída: numa coleta, sai para chegar quando o pedido fica pronto."""
+        kind, o = stop
         depart = sim.now
         if kind == PICKUP:
             node, dest = sim.node[courier], self.shop_node[o]
             travel = 0.0 if node == dest else float(self.leg_times(sim, np.array([node]), np.array([dest]))[0])
             depart = max(sim.now, self.ready[o] - travel - self.depart_margin_s)
         return kind, o, depart
+
+    def exhaustive_first_stop(self, sim: Sim, courier: int, stops: list[Stop]) -> Stop:
+        """Primeira parada da melhor sequência entre todas as válidas, com as estimativas deste planejador.
+
+        Serve de régua offline para o Jev (o planejador "re-otimizando agora"): até 6 paradas, ~90 sequências.
+        """
+        node = sim.node[courier]
+        nodes = {node} | {self._node(s) for s in stops}
+        pairs = [(a, b) for a in nodes for b in nodes if a != b]
+        times = self.leg_times(sim, np.array([a for a, _ in pairs]), np.array([b for _, b in pairs])).tolist()
+        travel = dict(zip(pairs, times))
+        best, best_cost = stops[0], float("inf")
+        for perm in itertools.permutations(stops):
+            seq = list(perm)
+            if not _valid(seq):
+                continue
+            cost = self.cost(seq, node, sim.now, travel)
+            if cost < best_cost:
+                best, best_cost = seq[0], cost
+        return best
 
 
 def _valid(seq: list[Stop]) -> bool:

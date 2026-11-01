@@ -76,6 +76,18 @@ def cmd_sim(args: argparse.Namespace) -> None:
             depart_margin_s=args.margin,
         )
 
+    def jev_policy(kind: str):
+        from .learn.eta import EtaModel
+        from .learn.jev import JevModel, JevPlanner
+        from .learn.prep import PrepModel
+
+        models = Path(args.models)
+        return JevPlanner(
+            PrepModel.load(models / "prep.npz"), EtaModel.load(models / "eta.npz"),
+            JevModel.load(models / f"jev-{kind}.npz"), record=bool(args.render),
+            prep_quantile=args.prep_quantile, depart_margin_s=args.margin,
+        )
+
     policy = {
         "b0": sim.NearestPolicy,
         "b1": lambda: planner.Planner(depart_margin_s=args.margin),
@@ -85,6 +97,8 @@ def cmd_sim(args: argparse.Namespace) -> None:
         "b1+preparo": lambda: learned(True, False),
         "b1+eta": lambda: learned(False, True),
         "b1+": lambda: learned(True, True),
+        "jev": lambda: jev_policy("linear"),
+        "jev-mlp": lambda: jev_policy("mlp"),
     }[args.policy]()
     keys = ("on_time_pct", "late_mean_min", "late_p90_min", "delivery_mean_min", "delivery_p90_min",
             "wait_for_courier_mean_min", "wait_at_restaurant_mean_min", "km_per_order", "courier_utilization_pct",
@@ -103,13 +117,16 @@ def cmd_sim(args: argparse.Namespace) -> None:
     unserved = sum(r["unserved"] for r in rows)
     print(f"  pedidos sem entrega: {unserved} de {sum(r['orders'] for r in rows)}")
     print(f"  tempo: {np.mean(elapsed):.2f} s por dia simulado ({events / sum(elapsed):,.0f} eventos por segundo)")
+    if getattr(policy, "decide_s", None):
+        d = np.array(policy.decide_s) * 1e6
+        print(f"  decisão do Jev (features + modelo): média {d.mean():.0f} us, P99 {np.percentile(d, 99):.0f} us, {len(d)} decisões")
     if getattr(policy, "decision_s", None):
         d = np.array(policy.decision_s) * 1000.0
         print(f"  planejar um pedido (assign): média {d.mean():.2f} ms, P99 {np.percentile(d, 99):.2f} ms, {len(d)} decisões")
     if args.render:
         result = sim.run_day(city, w, pth, fleet, policy, args.render_day, record=True)
-        payload = replay.render_replay(result, city, w, policy.name, args.render_day)
-        out = Path(args.render.replace("{policy}", policy.name.lower().replace("+", "plus")))
+        payload = replay.render_replay(result, city, w, policy.name, args.render_day, getattr(policy, "decisions", None))
+        out = Path(args.render.replace("{policy}", policy.name.lower().replace("+", "plus").replace(" (rede)", "-mlp")))
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
         print(f"replay do dia {args.render_day} -> {out} ({out.stat().st_size / 1e6:.2f} MB)")
@@ -172,6 +189,41 @@ def cmd_train_eta(args: argparse.Namespace) -> None:
         print(f"  {name:<28} MAE {a['mae_s']:6.1f} s ({a['mape_pct']:4.1f}%, viés {a['bias_pct']:+5.1f}%) | pico {b['mae_s']:6.1f} s ({b['mape_pct']:4.1f}%, viés {b['bias_pct']:+5.1f}%)")
 
 
+def cmd_train_jev(args: argparse.Namespace) -> None:
+    from .learn import jev
+    from .learn.eta import EtaModel
+    from .learn.prep import PrepModel
+
+    city, w = _world(args)
+    pth = paths.Paths.load(city, Path(args.paths))
+    fleet = sim.generate_fleet(w, city, world.PRESETS[args.preset]["couriers"], args.seed)
+    models = Path(args.models)
+    prep_model, eta_model = PrepModel.load(models / "prep.npz"), EtaModel.load(models / "eta.npz")
+    start = time.perf_counter()
+    train = jev.build_jev_set(city, w, pth, fleet, range(21, 51), prep_model, eta_model)
+    val = jev.build_jev_set(city, w, pth, fleet, range(61, 66), prep_model, eta_model)
+    test = jev.build_jev_set(city, w, pth, fleet, range(101, 121), prep_model, eta_model, planner_view=True)
+    collect_s = time.perf_counter() - start
+    print(f"decisões do B2 com 2 ou mais candidatas: {len(train)} de treino (dias 21-50), {len(val)} de validação (61-65), {len(test)} de teste (101-120); coleta {collect_s:.0f} s")
+    out = {"collect_s": collect_s}
+    for kind in ("linear", "mlp"):
+        t0 = time.perf_counter()
+        model = jev.train_jev(train, val, kind=kind, epochs=args.epochs, seed=args.seed, log=lambda s: None)
+        metrics = jev.evaluate_jev(model, test)
+        metrics["training_s"] = time.perf_counter() - t0
+        model.save(models / f"jev-{kind}.npz")
+        out[kind] = metrics
+        b = metrics["baselines_top1"]
+        print(f"[{kind}] acerto {metrics['top1']:.3f} (acaso {metrics['chance']:.3f}), NLL {metrics['nll']:.3f}, ECE {metrics['ece']:.3f}, "
+              f"decisão {metrics['decide_us']:.0f} us, treino {metrics['training_s']:.0f} s | mais próxima {b['parada_mais_proxima']:.3f}, "
+              f"menor folga {b['menor_folga_do_prazo']:.3f}, planejador {b.get('planejador_reotimizando', float('nan')):.3f}")
+    (models / "jev.json").write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
+    lin = jev.JevModel.load(models / "jev-linear.npz")
+    print("pesos do Jev linear (por desvio padrão do fator):")
+    for name, wgt in sorted(zip(jev.FEATURES, lin.weights), key=lambda t: -abs(t[1])):
+        print(f"  {jev.FEATURE_LABELS[name]:<36}{wgt:+.3f}")
+
+
 def cmd_world(args: argparse.Namespace) -> None:
     preset = world.PRESETS[args.preset]
     restaurants = args.restaurants or preset["restaurants"]
@@ -228,7 +280,7 @@ def main(argv: list[str] | None = None) -> None:
 
     sm = sub.add_parser("sim", help="simula a frota").add_subparsers(dest="sim_command", required=True)
     run_sim = sm.add_parser("run", help="roda dias simulados com uma política e mostra as métricas")
-    run_sim.add_argument("--policy", choices=["b0", "b1", "b2", "b1-preparo", "b1-transito", "b1+preparo", "b1+eta", "b1+"], default="b0")
+    run_sim.add_argument("--policy", choices=["b0", "b1", "b2", "b1-preparo", "b1-transito", "b1+preparo", "b1+eta", "b1+", "jev", "jev-mlp"], default="b0")
     run_sim.add_argument("--models", default="models", help="pasta dos modelos aprendidos (b1+...)")
     run_sim.add_argument("--prep-quantile", type=float, default=planner.PREP_QUANTILE, help="quantil do preparo previsto que o b1+ usa")
     run_sim.add_argument("--margin", type=float, default=None, help="margem de saída em segundos (padrão do planejador)")
@@ -262,6 +314,15 @@ def main(argv: list[str] | None = None) -> None:
     train_eta.add_argument("--paths", default="data/out/paths")
     train_eta.add_argument("--out", default="models/eta.npz")
     train_eta.set_defaults(func=cmd_train_eta)
+
+    train_jev = tr.add_parser("jev", help="o Jev: próxima parada, imitando o B2 (precisa dos modelos de preparo e ETA)")
+    train_jev.add_argument("--preset", choices=sorted(world.PRESETS), default="plataforma")
+    train_jev.add_argument("--seed", type=int, default=7)
+    train_jev.add_argument("--epochs", type=int, default=30)
+    train_jev.add_argument("--city", default="data/out/city.npz")
+    train_jev.add_argument("--paths", default="data/out/paths")
+    train_jev.add_argument("--models", default="models")
+    train_jev.set_defaults(func=cmd_train_jev)
 
     wd = sub.add_parser("world", help="restaurantes e demanda sintéticos").add_subparsers(
         dest="world_command", required=True
