@@ -216,3 +216,33 @@ export function nearestCourier(frame: Frame, v: View, px: number, py: number, ma
   }
   return best;
 }
+
+export interface CandidateMark {
+  x: number;
+  y: number;
+  prob: number;
+  chosen: boolean;
+}
+
+/** As paradas que o Jev estava comparando: o tamanho do anel é a probabilidade, o escolhido é cheio. */
+export function drawCandidates(ctx: CanvasRenderingContext2D, v: View, marks: CandidateMark[], colors: LayerColors) {
+  ctx.lineWidth = 2;
+  ctx.font = "600 11px ui-monospace, SFMono-Regular, Menlo, monospace";
+  ctx.textBaseline = "middle";
+  for (const m of marks) {
+    const x = sx(v, m.x);
+    const y = sy(v, m.y);
+    const r = 8 + 14 * m.prob;
+    ctx.strokeStyle = colors.accent;
+    ctx.fillStyle = colors.accent;
+    ctx.globalAlpha = m.chosen ? 0.28 : 0.1;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = m.chosen ? 1 : 0.6;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = colors.accent;
+    ctx.fillText(`${Math.round(m.prob * 100)}%`, x + r + 4, y);
+  }
+}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toLatLon, type City, type Street } from "./city";
 import {
+  drawCandidates,
   drawCouriers,
   drawHeat,
   drawLiveOrders,
@@ -8,6 +9,7 @@ import {
   drawRoute,
   nearestCourier,
   nearestRestaurant,
+  type CandidateMark,
   type LayerColors,
   type Layers,
   type View,
@@ -37,6 +39,7 @@ interface Props {
   layers: Layers;
   selected: number | null;
   onSelect: (courier: number | null) => void;
+  marks: CandidateMark[];
 }
 
 // Largura real da rua em metros (some quando o zoom é pequeno) e limites em pixels.
@@ -84,7 +87,7 @@ function readPalette(classes: string[]) {
   };
 }
 
-export function MapCanvas({ city, visible, fit, world, replay, frame: couriers, clock, layers, selected, onSelect }: Props) {
+export function MapCanvas({ city, visible, fit, world, replay, frame: couriers, clock, layers, selected, onSelect, marks }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const cam = useRef<Camera>({ x: 0, y: 0, scale: 0.05 });
@@ -92,7 +95,7 @@ export function MapCanvas({ city, visible, fit, world, replay, frame: couriers, 
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const frame = useRef(0);
   const visibleRef = useRef(visible);
-  const overlayRef = useRef({ world, replay, couriers, clock, layers, selected });
+  const overlayRef = useRef({ world, replay, couriers, clock, layers, selected, marks });
   const routeCache = useRef<{ leg: number; line: Float32Array } | null>(null);
   const down = useRef<{ x: number; y: number } | null>(null);
   const palette = useRef(readPalette(city.payload.classes));
@@ -171,6 +174,7 @@ export function MapCanvas({ city, visible, fit, world, replay, frame: couriers, 
     if (overlay.couriers && overlay.layers.couriers) {
       drawCouriers(ctx, view, overlay.couriers, overlay.selected, colors);
     }
+    if (overlay.marks.length) drawCandidates(ctx, view, overlay.marks, colors);
 
     drawScaleBar(ctx, h, scale, palette.current.scale, palette.current.text);
   }, [byClass, classes, city]);
@@ -264,9 +268,9 @@ export function MapCanvas({ city, visible, fit, world, replay, frame: couriers, 
   }, [visible, requestDraw]);
 
   useEffect(() => {
-    overlayRef.current = { world, replay, couriers, clock, layers, selected };
+    overlayRef.current = { world, replay, couriers, clock, layers, selected, marks };
     requestDraw();
-  }, [world, replay, couriers, clock, layers, selected, requestDraw]);
+  }, [world, replay, couriers, clock, layers, selected, marks, requestDraw]);
 
   // tema claro/escuro: relê as cores do CSS
   useEffect(() => {

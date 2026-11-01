@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CLASS_LABEL, loadCity, type City } from "./city";
-import type { Layers } from "./layers";
+import type { CandidateMark, Layers } from "./layers";
 import { MapCanvas, type FitRequest } from "./MapCanvas";
 import {
   MODE_AT_SHOP,
@@ -22,8 +22,8 @@ const int = new Intl.NumberFormat("pt-BR");
 const km = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
 const one = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
 const SPEEDS = [60, 300, 1200];
-type PolicyId = "b0" | "b1" | "b1plus" | "b2";
-const POLICIES: PolicyId[] = ["b0", "b1", "b1plus", "b2"];
+type PolicyId = "b0" | "b1" | "b1plus" | "jev" | "b2";
+const POLICIES: PolicyId[] = ["b0", "b1", "b1plus", "jev", "b2"];
 const POLICY_INFO: Record<PolicyId, { name: string; role: string; text: string }> = {
   b0: {
     name: "B0",
@@ -39,6 +39,11 @@ const POLICY_INFO: Record<PolicyId, { name: string; role: string; text: string }
     name: "B1+",
     role: "aprendido",
     text: "O B1 com o modelo de preparo e o ETA aprendidos no lugar das regras. Só usa o que a plataforma sabe: restaurante, hora, previsão do tempo e posições.",
+  },
+  jev: {
+    name: "Jev",
+    role: "explica",
+    text: "Atribui como o B1+ e escolhe a próxima parada com o Jev, um modelo linear treinado para imitar o B2 só com o que a plataforma enxerga. Clique num entregador para ver as candidatas, a probabilidade de cada uma e o que pesou.",
   },
   b2: {
     name: "B2",
@@ -109,6 +114,35 @@ export function App() {
     return computeFrame(replay, city, clock, buffer.current);
     // o buffer é reaproveitado; o relógio é o que muda
   }, [replay, city, clock]);
+
+  const legIndex = selected !== null && frame ? frame.leg[selected] : -1;
+  const decision = useMemo(() => {
+    const d = replay?.payload.decisions;
+    if (!replay || !world || !d || legIndex < 0) return null;
+    const i = replay.decisionOfLeg[legIndex];
+    if (i < 0) return null;
+    const r = world.payload.restaurants;
+    const candidates: DecisionCandidate[] = [];
+    for (let k = d.ptr[i]; k < d.ptr[i + 1]; k++) {
+      const o = d.order[k];
+      const shop = replay.payload.orders.restaurant[o];
+      const pickup = d.kind[k] === 0;
+      candidates.push({
+        pickup,
+        shopKind: replay.payload.orders.kind[o],
+        prob: d.prob[k],
+        x: pickup ? r.x[shop] : replay.order.x[o],
+        y: pickup ? r.y[shop] : replay.order.y[o],
+        contrib: d.contrib[k] ?? null,
+        chosen: k - d.ptr[i] === d.chosen[i],
+      });
+    }
+    return { t: replay.legT0[legIndex], candidates, labels: d.labels };
+  }, [replay, world, legIndex]);
+  const marks = useMemo<CandidateMark[]>(
+    () => (decision ? decision.candidates.map((c) => ({ x: c.x, y: c.y, prob: c.prob, chosen: c.chosen })) : []),
+    [decision],
+  );
 
   const choosePolicy = (id: PolicyId) => {
     setPolicy(id);
@@ -220,6 +254,7 @@ export function App() {
         {replay && selected !== null && frame && (
           <CourierPanel replay={replay} frame={frame} courier={selected} clock={clock} onClose={() => setSelected(null)} />
         )}
+        {decision && replay && <DecisionPanel decision={decision} kinds={replay.payload.kinds} />}
 
         {replay && (
           <section aria-labelledby="policy-title">
@@ -420,6 +455,7 @@ export function App() {
             layers={layers}
             selected={selected}
             onSelect={setSelected}
+            marks={marks}
           />
         ) : (
           <div className="map placeholder">{error ? "" : "Carregando as ruas…"}</div>
@@ -528,5 +564,79 @@ function PolicyTable({ replays, current }: { replays: Partial<Record<PolicyId, R
         })}
       </tbody>
     </table>
+  );
+}
+
+interface DecisionCandidate {
+  pickup: boolean;
+  shopKind: number;
+  prob: number;
+  x: number;
+  y: number;
+  contrib: number[] | null;
+  chosen: boolean;
+}
+
+interface DecisionView {
+  t: number;
+  candidates: DecisionCandidate[];
+  labels: string[];
+}
+
+const signed = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2).replace(".", ",")}`;
+
+function DecisionPanel({ decision, kinds }: { decision: DecisionView; kinds: string[] }) {
+  const stop = (c: DecisionCandidate) => `${c.pickup ? "Coletar" : "Entregar"} (${kinds[c.shopKind]})`;
+  const chosen = decision.candidates.find((c) => c.chosen)!;
+  const others = decision.candidates.filter((c) => !c.chosen).map((c) => c.prob);
+  const margin = chosen.prob - Math.max(...others);
+  const rows = chosen.contrib
+    ? decision.labels
+        .map((label, j) => ({ label, v: chosen.contrib![j] }))
+        .sort((a, b) => Math.abs(b.v) - Math.abs(a.v))
+        .slice(0, 6)
+    : [];
+  const maxAbs = Math.max(0.01, ...rows.map((r) => Math.abs(r.v)));
+  return (
+    <section aria-labelledby="why-title">
+      <h3 id="why-title">Por que esta parada</h3>
+      <p className="note">
+        Decisão às {clockLabel(decision.t)}, entre {decision.candidates.length} candidatas. Escolheu{" "}
+        <strong>{stop(chosen).toLowerCase()}</strong> com {Math.round(chosen.prob * 100)}% de confiança,{" "}
+        {Math.round(margin * 100)} pontos à frente da segunda.
+      </p>
+      <ul className="cands">
+        {decision.candidates.map((c, i) => (
+          <li key={i} className={c.chosen ? "chosen" : undefined}>
+            <span className="cand-label">{stop(c)}</span>
+            <span className="cand-bar" aria-hidden="true">
+              <i style={{ width: `${c.prob * 100}%` }} />
+            </span>
+            <span className="cand-pct">{Math.round(c.prob * 100)}%</span>
+          </li>
+        ))}
+      </ul>
+      {rows.length > 0 && (
+        <>
+          <h4 className="why-title">O que pesou na escolhida</h4>
+          <ul className="why">
+            {rows.map((r) => (
+              <li key={r.label}>
+                <span className="why-label">{r.label}</span>
+                <span className="why-bar" aria-hidden="true">
+                  <i className={r.v >= 0 ? "pos" : "neg"} style={{ width: `${(Math.abs(r.v) / maxAbs) * 100}%` }} />
+                </span>
+                <span className="why-val">{signed(r.v)}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="note">
+            Cada barra é quanto o fator puxou esta parada para cima (verde) ou para baixo (vermelho) em relação à
+            média das alternativas, na pontuação do modelo. Os fatores andam juntos (atraso e folga, por exemplo),
+            então leia o conjunto.
+          </p>
+        </>
+      )}
+    </section>
   );
 }

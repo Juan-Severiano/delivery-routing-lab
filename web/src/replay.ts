@@ -1,5 +1,17 @@
 import type { City } from "./city";
 
+export interface DecisionPayload {
+  leg: number[]; // trecho que nasceu de cada decisão
+  chosen: number[]; // índice da escolhida entre as candidatas
+  ptr: number[]; // candidatas da decisão i: ptr[i] até ptr[i + 1]
+  kind: number[]; // 0 coleta, 1 entrega
+  order: number[];
+  prob: number[];
+  contrib: number[][]; // por candidata, o peso de cada fator (só no modelo linear)
+  factors: string[];
+  labels: string[];
+}
+
 export interface ReplayPayload {
   meta: {
     policy: string;
@@ -32,6 +44,7 @@ export interface ReplayPayload {
     rejected: number[];
   };
   kinds: string[];
+  decisions?: DecisionPayload;
 }
 
 export const MODE_OFFLINE = 0;
@@ -53,6 +66,7 @@ export interface Replay {
   firstLeg: Int32Array;
   shiftStart: Float64Array;
   shiftEnd: Float64Array;
+  decisionOfLeg: Int32Array; // -1 quando o trecho não nasceu de uma decisão do Jev
   order: {
     x: Float32Array;
     y: Float32Array;
@@ -82,8 +96,13 @@ export async function loadReplay(url: string): Promise<Replay> {
     legEnd[i] = legT0[i] + total;
   }
   const o = p.orders;
+  const decisionOfLeg = new Int32Array(legT0.length).fill(-1);
+  p.decisions?.leg.forEach((leg, i) => {
+    decisionOfLeg[leg] = i;
+  });
   return {
     payload: p,
+    decisionOfLeg,
     edgeGeom: Int32Array.from(p.edges.geom),
     edgeRev: Uint8Array.from(p.edges.rev),
     legEdges: Int32Array.from(p.leg_edges),

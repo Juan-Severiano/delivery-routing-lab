@@ -637,3 +637,74 @@ table.compare td.best {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* Passo 6: por que esta parada */
+.cands,
+.why {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cands li {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 38px;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.cands li.chosen .cand-label {
+  font-weight: 600;
+}
+
+.cand-bar,
+.why-bar {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--muted) 18%, transparent);
+  overflow: hidden;
+}
+
+.cand-bar i,
+.why-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--accent);
+}
+
+.cands li:not(.chosen) .cand-bar i {
+  background: var(--muted);
+}
+
+.cand-pct,
+.why-val {
+  font: 12px var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.why li {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.why-bar i.pos {
+  background: var(--courier-drop);
+}
+
+.why-bar i.neg {
+  background: var(--late);
+}
+
+.why-title {
+  margin: 14px 0 0;
+}
