@@ -8,17 +8,19 @@ A pergunta que guia o projeto: **quanto um modelo treinado consegue se aproximar
 
 ## Estado
 
-Projeto no **Passo 2** (restaurantes e demanda sobre a cidade). Ainda não há entregadores, baseline nem modelo.
+Projeto no **Passo 3** (simulador de frota com o baseline B0). Ainda não há planejador clássico (B1 e B2) nem modelo.
 
 | | Estado |
 |---|---|
 | Ruas de Itapipoca (baixar do OSM, montar o grafo, maior componente conectada) | feito |
 | Mapa em Vite/React com pan, zoom e camadas por classe de via | feito |
 | Restaurantes sintéticos, curva de demanda por hora e pedidos do dia (por semente) | feito |
-| Mapa de calor de demanda, restaurantes online por hora e pedidos do dia no mapa | feito |
-| Entregadores e pedidos andando pelas ruas | não feito |
-| Simulador de frota com trânsito escondido | não feito |
-| Baselines: vizinho mais próximo, inserção + 2-opt, e o mesmo com tempo real (teto) | não feito |
+| Mapa de calor de demanda e restaurantes online por hora no mapa | feito |
+| Caminhos mínimos entre todos os cruzamentos (Python puro) | feito |
+| Trânsito escondido, ciclo do pedido, entregadores com turno e mochila, simulador por eventos | feito |
+| Baseline B0 (entregador livre mais próximo, parada mais próxima) e métricas por dia | feito |
+| Replay do dia e mapa com entregadores andando, pedidos em aberto e rota do entregador | feito |
+| Baselines B1 (inserção + 2-opt, tempo livre) e B2 (o mesmo com tempo real, o teto) | não feito |
 | Modelos próprios: ETA, preparo, próxima parada (`decide`), aceite de oferta | não feito |
 | Explicação da escolha no mapa | não feito |
 
@@ -86,6 +88,56 @@ Como o mundo é montado:
 - As distâncias deste passo são em linha reta. O caminho pelas ruas entra no simulador (Passo 3).
 - Pedidos que não acham restaurante online no raio são descartados e contados à parte.
 
+## Simulador e o baseline B0 (Passo 3)
+
+Um dia simulado por semente: pedidos do Passo 2, entregadores com turno e mochila de 3 pedidos, trânsito escondido e preparo escondido. O B0 é o **piso** da escada: o pedido vai para o entregador **livre** mais próximo (se ninguém está livre, o mais próximo com espaço) e cada entregador faz sempre a parada mais próxima. Distâncias em linha reta. Ele não olha trânsito nem preparo, então manda o entregador no instante em que o pedido nasce e ele espera no restaurante.
+
+Medido com `delivery-lab sim run --days 20` no preset `plataforma` (~5.300 pedidos por dia), mesmos 20 dias para as três frotas, média ± desvio entre dias:
+
+| Entregadores | 300 | 400 | 550 |
+|---|---|---|---|
+| Entregues no prazo (%) | 63,1 ± 3,6 | **77,0 ± 4,2** | 90,0 ± 2,6 |
+| Atraso médio (min) | 16,2 ± 1,5 | 8,6 ± 1,0 | 5,7 ± 0,7 |
+| Atraso P90 (min) | 44,0 ± 4,0 | 15,1 ± 3,9 | 0,9 ± 1,7 |
+| Tempo do pedido, média (min) | 49,1 ± 2,2 | 39,2 ± 1,9 | 34,0 ± 1,4 |
+| Tempo do pedido, P90 (min) | 89,9 ± 3,9 | 64,1 ± 4,0 | 49,6 ± 2,5 |
+| Espera por entregador (min) | 6,5 | 5,0 | 4,9 |
+| Espera no restaurante (min) | 11,5 | 14,3 | 17,4 |
+| Km rodados por pedido | 4,94 | 4,91 | 4,49 |
+| Utilização dos entregadores (%) | 84,1 | 72,5 | 57,5 |
+
+A frota de **400 é a usada nas medições**: com 300 o piso fica saturado (84% de utilização) e com 550 sobra gente; em 400 há folga para um planejador melhorar. Nenhum dos 106.617 pedidos ficou sem entrega. A **espera no restaurante cresce com a frota** (11,5, 14,3, 17,4 min): é o desperdício que o B0 não evita, e é onde o preparo aprendido deve ajudar.
+
+Como o dia é montado:
+
+- **Caminho** é o de menor tempo livre (comprimento / velocidade livre da classe), calculado uma vez para todos os pares de cruzamentos e guardado. O entregador não escolhe outro caminho por causa do trânsito.
+- **Tempo real** de cada aresta = tempo livre × `(1 + 1,0 × pico(hora) × centralidade × sensibilidade da classe × chuva)` × ruído por zona de 1 km (AR(1) ao longo das horas) × fator do dia, mais um ruído de 8% por viagem. O pico tem três picos (manhã fraca, almoço, fim de tarde), a centralidade cai com `exp(-distância ao centro / 2,5 km)` e chove em 20% dos dias.
+- **Preparo** de cada pedido: média do restaurante naquela hora (mais lento no pico) × lognormal, mais 10% com chuva.
+- **Prazo prometido** = criado + 10 min + preparo médio esperado + 6 min por km em linha reta restaurante-cliente. É a regra do laboratório; ela afeta o nível de "no prazo" de todos os degraus, não a comparação entre eles.
+- **Turnos:** 25% almoço (11h a 15h), 25% dia todo (11h a 23h), 50% noite (17h30 à 1h), com ±30 min de variação por entregador.
+- Retirada leva 60 s, entrega 60 s, e o pedido conta como entregue 45 s depois da chegada ao cliente.
+
+### Desempenho (e a decisão sobre Go)
+
+Medido neste Mac (Apple Silicon, 16 GB), Python 3.14, sem biblioteca de grafos:
+
+| | |
+|---|---|
+| Caminhos mínimos, 7.288 origens (Dijkstra com `heapq`) | 18,1 s, 2,5 ms por origem (uma vez; 212 MB de tempos e 106 MB de predecessoras em disco) |
+| Um dia simulado, ~5.300 pedidos e 400 entregadores | 0,21 s (~130 mil eventos por segundo) |
+| O dobro da escala (~10.700 pedidos, 800 entregadores) | 0,46 s |
+| Onde o tempo vai (profile de um dia) | reconstruir caminhos 45%, despacho e atribuição o resto |
+| Mapa: posição dos 400 entregadores + pedidos em aberto por quadro | 0,03 ms |
+
+**Go não se justifica neste passo.** O plano era portar só o que o profile mostrasse lento, e o caminho mínimo e o simulador ficam longe disso. O ponto a medir de novo é o planejador do Passo 4 (inserção + 2-opt a cada decisão).
+
+### Suposições e limites do Passo 3
+
+- **Todo o trânsito, o preparo, os turnos e o prazo são suposições do laboratório**; nada foi medido em operação real. O modelo vai aprender o que o simulador gera.
+- O tempo real de uma aresta, medido em 20 dias, vai de 0,73 a 2,49 vezes o tempo livre (1% das arestas-hora abaixo de 0,88): o ruído de zona e do dia pode deixá-la mais rápida que o "livre", que é uma referência e não um teto físico.
+- O B0 mede a posição do entregador no fim do trecho em curso, não a posição exata naquele instante.
+- Só um dia (o dia 1) vai para o replay do mapa; as métricas acima são de 20 dias.
+
 ## Como rodar
 
 Requer [uv](https://docs.astral.sh/uv/) e Node 20.19 ou mais novo.
@@ -95,6 +147,8 @@ uv sync --extra dev
 uv run delivery-lab city fetch      # baixa as ruas do Overpass (um pedido, ~7 MB)
 uv run delivery-lab city build      # grafo + JSON do mapa
 uv run delivery-lab world build     # restaurantes, demanda e JSON do mapa (--preset dev para o pequeno)
+uv run delivery-lab paths build     # caminhos mínimos entre todos os cruzamentos (~20 s, ~320 MB, não versionado)
+uv run delivery-lab sim run --days 20 --render web/public/data/replay.json   # métricas do B0 e replay do dia 1
 uv run pytest
 npm --prefix web install
 npm --prefix web run dev            # http://localhost:5173
