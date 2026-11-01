@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toLatLon, type City, type Street } from "./city";
 import {
+  drawCouriers,
   drawHeat,
-  drawOrders,
+  drawLiveOrders,
   drawRestaurants,
+  drawRoute,
+  nearestCourier,
   nearestRestaurant,
+  type LayerColors,
   type Layers,
   type View,
 } from "./layers";
+import { legPolyline, openOrders, type Frame, type Replay } from "./replay";
 import { formatWindow, type World } from "./world";
 
 interface Camera {
@@ -26,8 +31,12 @@ interface Props {
   visible: boolean[];
   fit: FitRequest;
   world: World | null;
-  hour: number;
+  replay: Replay | null;
+  frame: Frame | null;
+  clock: number; // segundos desde a meia-noite
   layers: Layers;
+  selected: number | null;
+  onSelect: (courier: number | null) => void;
 }
 
 // Largura real da rua em metros (some quando o zoom é pequeno) e limites em pixels.
@@ -60,14 +69,22 @@ function readPalette(classes: string[]) {
     roads: classes.map((c) => get(`--road-${c}`)),
     text: get("--text"),
     scale: get("--scale-bar"),
-    heat: get("--heat"),
-    shop: get("--shop"),
-    order: get("--order"),
-    ring: get("--bg"),
+    layer: {
+      heat: get("--heat"),
+      shop: get("--shop"),
+      ring: get("--bg"),
+      accent: get("--accent"),
+      waiting: get("--wait"),
+      active: get("--order"),
+      late: get("--late"),
+      toPickup: get("--courier-pickup"),
+      toDrop: get("--courier-drop"),
+      stopped: get("--courier-idle"),
+    } satisfies LayerColors,
   };
 }
 
-export function MapCanvas({ city, visible, fit, world, hour, layers }: Props) {
+export function MapCanvas({ city, visible, fit, world, replay, frame: couriers, clock, layers, selected, onSelect }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const cam = useRef<Camera>({ x: 0, y: 0, scale: 0.05 });
@@ -75,12 +92,15 @@ export function MapCanvas({ city, visible, fit, world, hour, layers }: Props) {
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const frame = useRef(0);
   const visibleRef = useRef(visible);
-  const worldRef = useRef({ world, hour, layers });
+  const overlayRef = useRef({ world, replay, couriers, clock, layers, selected });
+  const routeCache = useRef<{ leg: number; line: Float32Array } | null>(null);
+  const down = useRef<{ x: number; y: number } | null>(null);
   const palette = useRef(readPalette(city.payload.classes));
   const [cursor, setCursor] = useState<[number, number] | null>(null);
   const [hover, setHover] = useState<{ index: number; x: number; y: number } | null>(null);
 
   const { classes, bounds, focus } = city.payload;
+  const hour = Math.floor(clock / 3600) % 24;
 
   // ruas agrupadas por classe, para um traçado por classe
   const byClass = useMemo(() => {
@@ -109,11 +129,13 @@ export function MapCanvas({ city, visible, fit, world, hour, layers }: Props) {
     const sx = (wx: number) => (wx - x) * scale + w / 2;
     const sy = (wy: number) => h / 2 - (wy - y) * scale;
     const view: View = { x, y, scale, w, h };
-    const overlay = worldRef.current;
+    const overlay = overlayRef.current;
+    const hour = Math.floor(overlay.clock / 3600) % 24;
+    const colors = palette.current.layer;
 
     // o calor fica por baixo das ruas
     if (overlay.world && overlay.layers.heat) {
-      drawHeat(ctx, view, overlay.world, overlay.hour, palette.current.heat);
+      drawHeat(ctx, view, overlay.world, hour, colors.heat);
     }
 
     // da via menor para a maior, para as principais ficarem por cima
@@ -132,15 +154,26 @@ export function MapCanvas({ city, visible, fit, world, hour, layers }: Props) {
       ctx.stroke();
     }
 
-    if (overlay.world && overlay.layers.orders) {
-      drawOrders(ctx, view, overlay.world, overlay.hour, palette.current.order);
+    // rota do trecho em curso do entregador selecionado
+    if (overlay.replay && overlay.couriers && overlay.selected !== null) {
+      const leg = overlay.couriers.leg[overlay.selected];
+      if (leg >= 0) {
+        if (routeCache.current?.leg !== leg) routeCache.current = { leg, line: legPolyline(overlay.replay, city, leg) };
+        drawRoute(ctx, view, routeCache.current.line, colors.accent);
+      }
+    }
+    if (overlay.replay && overlay.layers.orders) {
+      drawLiveOrders(ctx, view, overlay.replay, openOrders(overlay.replay, overlay.clock), colors);
     }
     if (overlay.world && overlay.layers.restaurants) {
-      drawRestaurants(ctx, view, overlay.world, overlay.hour, palette.current.shop, palette.current.ring);
+      drawRestaurants(ctx, view, overlay.world, hour, colors.shop, colors.ring);
+    }
+    if (overlay.couriers && overlay.layers.couriers) {
+      drawCouriers(ctx, view, overlay.couriers, overlay.selected, colors);
     }
 
     drawScaleBar(ctx, h, scale, palette.current.scale, palette.current.text);
-  }, [byClass, classes]);
+  }, [byClass, classes, city]);
 
   const requestDraw = useCallback(() => {
     if (!frame.current) frame.current = requestAnimationFrame(draw);
@@ -231,9 +264,9 @@ export function MapCanvas({ city, visible, fit, world, hour, layers }: Props) {
   }, [visible, requestDraw]);
 
   useEffect(() => {
-    worldRef.current = { world, hour, layers };
+    overlayRef.current = { world, replay, couriers, clock, layers, selected };
     requestDraw();
-  }, [world, hour, layers, requestDraw]);
+  }, [world, replay, couriers, clock, layers, selected, requestDraw]);
 
   // tema claro/escuro: relê as cores do CSS
   useEffect(() => {
@@ -275,6 +308,7 @@ export function MapCanvas({ city, visible, fit, world, hour, layers }: Props) {
   const onPointerDown = (e: React.PointerEvent) => {
     e.currentTarget.setPointerCapture(e.pointerId);
     pointers.current.set(e.pointerId, local(e));
+    down.current = pointers.current.size === 1 ? local(e) : null;
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -306,6 +340,18 @@ export function MapCanvas({ city, visible, fit, world, hour, layers }: Props) {
 
   const onPointerEnd = (e: React.PointerEvent) => {
     pointers.current.delete(e.pointerId);
+    down.current = null;
+  };
+
+  // um clique (sem arrastar) escolhe o entregador mais perto, ou limpa a escolha
+  const onPointerUp = (e: React.PointerEvent) => {
+    const start = down.current;
+    const p = local(e);
+    onPointerEnd(e);
+    if (!start || Math.hypot(p.x - start.x, p.y - start.y) > 5 || !couriers) return;
+    const { w, h } = size.current;
+    const { x, y, scale } = cam.current;
+    onSelect(nearestCourier(couriers, { x, y, scale, w, h }, p.x, p.y));
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -339,7 +385,7 @@ export function MapCanvas({ city, visible, fit, world, hour, layers }: Props) {
       tabIndex={0}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
-      onPointerUp={onPointerEnd}
+      onPointerUp={onPointerUp}
       onPointerCancel={onPointerEnd}
       onPointerLeave={() => {
         setCursor(null);

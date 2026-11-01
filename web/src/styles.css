@@ -434,3 +434,135 @@ input[type="range"] {
   color: var(--accent);
   font-style: normal;
 }
+
+/* Passo 3: entregadores, pedidos em aberto e relógio */
+:root {
+  --wait: #c2410c;
+  --late: #c81e1e;
+  --courier-pickup: #6d28d9;
+  --courier-drop: #15803d;
+  --courier-idle: #6b7280;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --wait: #fb923c;
+    --late: #ff6b6b;
+    --courier-pickup: #b794f6;
+    --courier-drop: #4ade80;
+    --courier-idle: #8b95a5;
+  }
+}
+
+.clock-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.speed {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.speed button {
+  min-height: 34px;
+  padding: 0 10px;
+  font: 12px var(--mono);
+  border: 0;
+  border-radius: 0;
+}
+
+.speed button + button {
+  border-left: 1px solid var(--border);
+}
+
+.speed button[aria-pressed="true"] {
+  color: var(--bg);
+  background: var(--accent);
+}
+
+.swatch.sq {
+  height: 9px;
+  width: 9px;
+  justify-self: center;
+  border-radius: 2px;
+}
+
+.swatch.pickup {
+  background: var(--courier-pickup);
+}
+
+.swatch.drop {
+  background: var(--courier-drop);
+}
+
+.swatch.idle {
+  background: var(--courier-idle);
+}
+
+.swatch.dot.wait {
+  background: var(--wait);
+}
+
+.swatch.dot.late {
+  background: var(--late);
+}
+
+.bag {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bag li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.bag .late {
+  color: var(--late);
+}
+
+.panel h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+.row.between {
+  justify-content: space-between;
+  align-items: center;
+}
+
+.check-spacer {
+  width: 13px;
+}
+
+.stats dd.late {
+  color: var(--late);
+}
+
+details {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+details > summary {
+  cursor: pointer;
+  font: 600 12px/1.4 var(--font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+details[open] > summary {
+  margin-bottom: 10px;
+}
