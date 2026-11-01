@@ -39,10 +39,10 @@ KINDS: tuple[Kind, ...] = (
 )
 
 # `restaurants` = cadastrados; `active_share` = fração que de fato atua; só os ativos dentro da janela
-# ficam online. O pico de online é medido e vai no README, não é um alvo.
+# ficam online. O pico de online é medido e vai no README, não é um alvo. `couriers` é o tamanho da frota.
 PRESETS = {
-    "dev": {"restaurants": 40, "orders_per_day": 900, "active_share": 1.0},
-    "plataforma": {"restaurants": 600, "orders_per_day": 5500, "active_share": 0.6},
+    "dev": {"restaurants": 40, "orders_per_day": 900, "active_share": 1.0, "couriers": 70},
+    "plataforma": {"restaurants": 600, "orders_per_day": 5500, "active_share": 0.6, "couriers": 400},
 }
 
 # Peso do cruzamento para abrir restaurante, conforme a melhor via que passa por ele.

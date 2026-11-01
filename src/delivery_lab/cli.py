@@ -8,7 +8,9 @@ from pathlib import Path
 
 import numpy as np
 
-from . import osm, world
+import time
+
+from . import osm, paths, replay, sim, world
 from .city import City, build_city, render_payload
 
 
@@ -38,6 +40,54 @@ def cmd_stats(args: argparse.Namespace) -> None:
     print(f"nós: {city.n_nodes}, arestas: {city.n_edges}, semáforos: {int(city.node_signal.sum())}")
     for name, km in city.km_by_class().items():
         print(f"  {name:<13}{km:8.1f} km")
+
+
+def cmd_paths(args: argparse.Namespace) -> None:
+    city = City.load(Path(args.city))
+    start = time.perf_counter()
+    dist, pred = paths.apsp_python(city)
+    elapsed = time.perf_counter() - start
+    paths.Paths(city, dist, pred).save(Path(args.out))
+    print(f"caminhos mínimos de {city.n_nodes} origens em {elapsed:.1f} s (Python puro, {elapsed / city.n_nodes * 1000:.1f} ms por origem)")
+    print(f"-> {args.out} ({dist.nbytes / 1e6:.0f} MB de tempos + {pred.nbytes / 1e6:.0f} MB de predecessoras)")
+
+
+def _setup(args: argparse.Namespace):
+    preset = world.PRESETS[args.preset]
+    city = City.load(Path(args.city))
+    w = world.generate_world(
+        city, args.seed, preset["restaurants"], preset["orders_per_day"], 4000.0, preset["active_share"]
+    )
+    fleet = sim.generate_fleet(w, city, args.couriers or preset["couriers"], args.seed)
+    return city, w, paths.Paths.load(city, Path(args.paths)), fleet
+
+
+def cmd_sim(args: argparse.Namespace) -> None:
+    city, w, pth, fleet = _setup(args)
+    policy = {"b0": sim.NearestPolicy}[args.policy]()
+    keys = ("on_time_pct", "late_mean_min", "late_p90_min", "delivery_mean_min", "delivery_p90_min",
+            "wait_for_courier_mean_min", "wait_at_restaurant_mean_min", "km_per_order", "courier_utilization_pct")
+    rows, elapsed, events = [], [], 0
+    for day in range(1, args.days + 1):
+        start = time.perf_counter()
+        result = sim.run_day(city, w, pth, fleet, policy, day)
+        elapsed.append(time.perf_counter() - start)
+        events += result.elapsed_events
+        rows.append(sim.summarize(result))
+    print(f"{policy.name}: {len(fleet)} entregadores, {args.days} dias (média ± desvio entre dias)")
+    for k in keys:
+        v = np.array([r[k] for r in rows])
+        print(f"  {k:<30}{v.mean():8.2f} ± {v.std():.2f}")
+    unserved = sum(r["unserved"] for r in rows)
+    print(f"  pedidos sem entrega: {unserved} de {sum(r['orders'] for r in rows)}")
+    print(f"  tempo: {np.mean(elapsed):.2f} s por dia simulado ({events / sum(elapsed):,.0f} eventos por segundo)")
+    if args.render:
+        result = sim.run_day(city, w, pth, fleet, policy, args.render_day, record=True)
+        payload = replay.render_replay(result, city, w, policy.name, args.render_day)
+        out = Path(args.render)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+        print(f"replay do dia {args.render_day} -> {out} ({out.stat().st_size / 1e6:.2f} MB)")
 
 
 def cmd_world(args: argparse.Namespace) -> None:
@@ -85,6 +135,27 @@ def main(argv: list[str] | None = None) -> None:
     stats = city.add_parser("stats", help="resumo do grafo montado")
     stats.add_argument("--city", default="data/out/city.npz")
     stats.set_defaults(func=cmd_stats)
+
+    pt = sub.add_parser("paths", help="caminhos mínimos entre todos os cruzamentos").add_subparsers(
+        dest="paths_command", required=True
+    )
+    build_paths = pt.add_parser("build", help="calcula e guarda os caminhos mínimos (tempo livre)")
+    build_paths.add_argument("--city", default="data/out/city.npz")
+    build_paths.add_argument("--out", default="data/out/paths")
+    build_paths.set_defaults(func=cmd_paths)
+
+    sm = sub.add_parser("sim", help="simula a frota").add_subparsers(dest="sim_command", required=True)
+    run_sim = sm.add_parser("run", help="roda dias simulados com uma política e mostra as métricas")
+    run_sim.add_argument("--policy", choices=["b0"], default="b0")
+    run_sim.add_argument("--preset", choices=sorted(world.PRESETS), default="plataforma")
+    run_sim.add_argument("--couriers", type=int, default=0, help="sobrescreve o tamanho da frota do preset")
+    run_sim.add_argument("--days", type=int, default=10)
+    run_sim.add_argument("--seed", type=int, default=7)
+    run_sim.add_argument("--render", default="", help="grava o replay de um dia neste arquivo")
+    run_sim.add_argument("--render-day", type=int, default=1)
+    run_sim.add_argument("--city", default="data/out/city.npz")
+    run_sim.add_argument("--paths", default="data/out/paths")
+    run_sim.set_defaults(func=cmd_sim)
 
     wd = sub.add_parser("world", help="restaurantes e demanda sintéticos").add_subparsers(
         dest="world_command", required=True

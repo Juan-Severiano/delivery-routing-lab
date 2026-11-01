@@ -129,7 +129,8 @@ REAL = Path(__file__).resolve().parents[1] / "data" / "out" / "city.npz"
 @pytest.mark.skipif(not REAL.exists(), reason="rode `delivery-lab city build` antes")
 def test_platform_scale_on_the_real_city():
     city = City.load(REAL)
-    big = w.generate_world(city, seed=7, **{**w.PRESETS["plataforma"]})
+    preset = {k: v for k, v in w.PRESETS["plataforma"].items() if k != "couriers"}
+    big = w.generate_world(city, seed=7, **preset)
     center, radius = urban_focus(city.node_xy)
     near = np.hypot(*(big.restaurant_xy - center).T) < 4 * radius
     assert near.mean() > 0.9  # restaurantes no miolo urbano, não na estrada rural
