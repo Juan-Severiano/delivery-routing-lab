@@ -49,7 +49,10 @@ def test_replay_leg_durations_match_the_simulation(replay):
 
 def test_summary_is_in_the_meta(replay):
     payload, _ = replay
-    assert payload["meta"]["policy"] == "B0" and payload["meta"]["summary"]["delivered"] == payload["meta"]["orders"]
+    summary = payload["meta"]["summary"]
+    assert payload["meta"]["policy"] == "B0"
+    assert summary["delivered"] + summary["unserved"] == payload["meta"]["orders"]
+    assert sum(payload["orders"]["rejected"]) == summary["unserved"]
     assert 0 < payload["meta"]["summary"]["on_time_pct"] <= 100
 
 

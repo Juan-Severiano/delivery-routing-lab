@@ -71,6 +71,7 @@ def render_replay(result: SimResult, city: City, world: World, policy: str, day:
             "delivered": _nullable(result.t_delivered),
             "promised": np.round(result.promised, 1).tolist(),
             "courier": result.courier.tolist(),
+            "rejected": result.rejected.astype(int).tolist(),
         },
         "kinds": [k.name for k in KINDS],
     }

@@ -23,7 +23,7 @@ from .world import Orders, World
 
 PICKUP, DROPOFF = 0, 1
 # tipos de evento
-ORDER_CREATED, ARRIVE, FREE, SHIFT_START, SHIFT_END = 0, 1, 2, 3, 4
+ORDER_CREATED, ARRIVE, FREE, SHIFT_START, SHIFT_END, WAKE = 0, 1, 2, 3, 4, 5
 
 
 @dataclass(frozen=True)
@@ -49,8 +49,8 @@ class Fleet:
 
 # Turnos genéricos: nome, fração da frota, janela em horas.
 FLEET_KINDS = (
-    ("almoço", 0.25, (11.0, 15.0)),
-    ("dia todo", 0.25, (11.0, 23.0)),
+    ("almoço", 0.25, (10.0, 14.5)),
+    ("dia todo", 0.25, (10.0, 23.0)),
     ("noite", 0.50, (17.5, 25.0)),
 )
 
@@ -68,13 +68,21 @@ def generate_fleet(world: World, city: City, couriers: int, seed: int = 7) -> Fl
 
 
 class Policy(Protocol):
-    """O que o simulador pede a uma política de despacho."""
+    """O que o simulador pede a uma política de despacho.
+
+    Opcionalmente a política também define `bind(sim)`, chamado no começo de cada dia, e
+    `started(sim, courier, stop)`, chamado quando o entregador de fato sai para a parada.
+    """
 
     def assign(self, sim: Sim, order: int) -> int:
         """Entregador que recebe o pedido, ou -1 se ninguém pode agora."""
 
-    def next_stop(self, sim: Sim, courier: int) -> tuple[int, int] | None:
-        """Próxima parada do entregador, como (PICKUP ou DROPOFF, pedido), ou None."""
+    def next_stop(self, sim: Sim, courier: int) -> tuple[int, int, float] | None:
+        """Próxima parada: (PICKUP ou DROPOFF, pedido, hora mais cedo de saída), ou None.
+
+        Se a hora de saída está no futuro, o entregador fica onde está e o simulador chama de novo
+        nessa hora (ou antes, se chegar pedido novo): quem planeja pode reordenar enquanto espera.
+        """
 
 
 class NearestPolicy:
@@ -97,7 +105,7 @@ class NearestPolicy:
         d[~candidates] = np.inf
         return int(d.argmin())
 
-    def next_stop(self, sim: Sim, courier: int) -> tuple[int, int] | None:
+    def next_stop(self, sim: Sim, courier: int) -> tuple[int, int, float] | None:
         bag = sim.bag[courier]
         if not bag:
             return None
@@ -110,7 +118,7 @@ class NearestPolicy:
                 kind, xy = PICKUP, sim.order_restaurant_xy[o]
             d = float(np.hypot(xy[0] - here[0], xy[1] - here[1]))
             if d < best_d:
-                best, best_d = (kind, o), d
+                best, best_d = (kind, o, 0.0), d
         return best
 
 
@@ -135,6 +143,7 @@ class SimResult:
     t_delivered: np.ndarray
     promised: np.ndarray
     courier: np.ndarray  # -1 se não atribuído
+    rejected: np.ndarray  # bool: criado quando nenhum entregador estava de turno, então foi recusado
     courier_distance_m: np.ndarray
     courier_busy_s: np.ndarray
     wait_at_restaurant_s: np.ndarray  # por pedido: quanto o entregador esperou o preparo
@@ -188,6 +197,7 @@ class Sim:
         self.t_picked = np.full(n, np.nan)
         self.t_delivered = np.full(n, np.nan)
         self.courier_of = np.full(n, -1, dtype=np.int64)
+        self.rejected = np.zeros(n, dtype=bool)
         self.wait_at_restaurant = np.zeros(n)
         self.picked = [False] * n
         self.pending: list[int] = []
@@ -199,6 +209,11 @@ class Sim:
         self.shift_ok = np.zeros(c, dtype=bool)
         self.busy = [False] * c
         self.bag: list[list[int]] = [[] for _ in range(c)]
+        # trecho em curso (para quem planeja): de onde saiu, quando e para qual parada; None se parado
+        self.leg_src = [0] * c
+        self.leg_t0 = [0.0] * c
+        self.leg_stop: list[tuple[int, int] | None] = [None] * c
+        self.wake_token = [0] * c
         self.distance_m = np.zeros(c)
         self.busy_s = np.zeros(c)
         self.legs: list[list[Leg]] | None = [[] for _ in range(c)] if record else None
@@ -214,6 +229,8 @@ class Sim:
         heapq.heappush(self._events, (t, self._seq, kind, a, b))
 
     def run(self) -> SimResult:
+        if hasattr(self.policy, "bind"):
+            self.policy.bind(self)
         for o in range(self.n_orders):
             self._push(self.t_created[o], ORDER_CREATED, o)
         for c in range(self.n_couriers):
@@ -224,6 +241,9 @@ class Sim:
             self.now = t
             self.n_events += 1
             if kind == ORDER_CREATED:
+                if not self.shift_ok.any():  # ninguém de turno: o aplicativo recusa o pedido
+                    self.rejected[a] = True
+                    continue
                 self.pending.append(a)
                 self._assign_pending(t)
             elif kind == ARRIVE:
@@ -235,6 +255,9 @@ class Sim:
             elif kind == SHIFT_START:
                 self.shift_ok[a] = True
                 self._assign_pending(t)
+            elif kind == WAKE:
+                if b == self.wake_token[a] and not self.busy[a]:
+                    self._dispatch(a, t)
             else:
                 self.shift_ok[a] = False
         return self._result()
@@ -256,15 +279,22 @@ class Sim:
 
     def _dispatch(self, c: int, t: float) -> None:
         stop = self.policy.next_stop(self, c)
+        self.wake_token[c] += 1  # cancela uma espera anterior: o plano pode ter mudado
         if stop is None:
             return
-        kind, o = stop
+        kind, o, depart = stop
+        if depart > t + 1e-6:
+            self._push(depart, WAKE, c, self.wake_token[c])
+            return
+        if hasattr(self.policy, "started"):
+            self.policy.started(self, c, stop)
         dest = int(self.order_restaurant_node[o] if kind == PICKUP else self.order_customer_node[o])
         edges = self.paths.edges(self.node[c], dest)
         noise = float(self.rng.lognormal(0.0, TRIP_NOISE_SIGMA))
         per_edge = self.traffic.edge_seconds[int(t // 3600) % 24, edges] * noise if edges else np.zeros(0)
         duration = float(per_edge.sum())
         self.busy[c] = True
+        self.leg_src[c], self.leg_t0[c], self.leg_stop[c] = self.node[c], t, (kind, o)
         self.distance_m[c] += float(self.city.edge_len[edges].sum()) if edges else 0.0
         self.busy_s[c] += duration
         self.anchor_xy[c] = self.city.node_xy[dest]
@@ -275,6 +305,7 @@ class Sim:
     def _arrive(self, t: float, c: int, code: int) -> None:
         o, kind = divmod(code, 2)
         cfg = self.config
+        self.leg_stop[c] = None
         if kind == PICKUP:
             self.node[c] = int(self.order_restaurant_node[o])
             wait = max(0.0, self.t_ready[o] - t)
@@ -302,6 +333,7 @@ class Sim:
             t_delivered=self.t_delivered,
             promised=self.promised,
             courier=self.courier_of,
+            rejected=self.rejected,
             courier_distance_m=self.distance_m,
             courier_busy_s=self.busy_s,
             wait_at_restaurant_s=self.wait_at_restaurant,
@@ -325,7 +357,8 @@ def summarize(result: SimResult) -> dict[str, float]:
     return {
         "orders": n,
         "delivered": int(done.sum()),
-        "unserved": int((~done).sum()),
+        "unserved": int((~done).sum()),  # os recusados por falta de entregador de turno
+        "rejected_pct": float(100.0 * result.rejected.mean()),
         "on_time_pct": float(100.0 * (late == 0).mean()),
         "late_mean_min": float(late.mean()),
         "late_p90_min": float(np.percentile(late, 90)),

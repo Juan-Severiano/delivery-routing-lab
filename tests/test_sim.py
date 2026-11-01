@@ -1,5 +1,6 @@
 from dataclasses import replace
 
+import helpers
 import numpy as np
 import pytest
 
@@ -9,25 +10,15 @@ from delivery_lab.traffic import build_traffic
 
 
 def tiny_orders(world, city, restaurants, customers, times):
-    """Pedidos montados à mão: restaurante, cruzamento do cliente e hora de criação (s)."""
-    customers = np.asarray(customers)
-    return W.Orders(
-        t_s=np.asarray(times, dtype=float),
-        restaurant=np.asarray(restaurants, dtype=np.int32),
-        customer_node=customers.astype(np.int32),
-        customer_xy=city.node_xy[customers],
-        dropped=0,
-    )
+    return helpers.tiny_orders(city, restaurants, customers, times)
 
 
 def always_on_fleet(city, nodes):
-    n = len(nodes)
-    return S.Fleet(np.zeros(n), np.full(n, 40 * 3600.0), np.asarray(nodes, dtype=np.int32))
+    return helpers.always_on_fleet(nodes)
 
 
 def run(city, world, paths, fleet, orders, policy=None, day=1, record=True, config=None):
-    traffic = build_traffic(city, world.seed, day)
-    return S.Sim(city, world, paths, traffic, fleet, orders, policy or S.NearestPolicy(), day, config, record).run()
+    return helpers.make_sim(city, world, paths, fleet, orders, policy or S.NearestPolicy(), day, record, config).run()
 
 
 @pytest.fixture(scope="module")
@@ -36,24 +27,37 @@ def day_result(grid_city, grid_world, grid_paths):
     return S.run_day(grid_city, grid_world, grid_paths, fleet, S.NearestPolicy(), day=1, record=True)
 
 
-def test_every_order_is_delivered_with_a_consistent_timeline(day_result):
+def test_every_accepted_order_is_delivered_with_a_consistent_timeline(day_result):
     r = day_result
-    assert not np.isnan(r.t_delivered).any()
-    assert (r.t_created <= r.t_assigned).all()
-    assert (r.t_assigned <= r.t_picked).all()
-    assert (r.t_picked < r.t_delivered).all()
-    assert (r.courier >= 0).all()
+    ok = ~r.rejected
+    assert ok.sum() > 500
+    assert not np.isnan(r.t_delivered[ok]).any()
+    assert (r.t_created[ok] <= r.t_assigned[ok]).all()
+    assert (r.t_assigned[ok] <= r.t_picked[ok]).all()
+    assert (r.t_picked[ok] < r.t_delivered[ok]).all()
+    assert (r.courier[ok] >= 0).all()
+
+
+def test_orders_created_while_nobody_is_on_shift_are_rejected(day_result):
+    r = day_result
+    first_shift = r.fleet.shift_start_s.min()
+    last_shift_end = r.fleet.shift_end_s.max()
+    assert r.rejected.any()
+    assert (r.rejected == ((r.t_created < first_shift) | (r.t_created >= last_shift_end))).all()
+    assert np.isnan(r.t_delivered[r.rejected]).all() and (r.courier[r.rejected] == -1).all()
 
 
 def test_nobody_collects_before_the_order_is_ready(day_result):
     r = day_result
-    assert (r.t_picked >= r.t_ready + r.config.handover_s - 1e-6).all()
+    ok = ~r.rejected
+    assert (r.t_picked[ok] >= r.t_ready[ok] + r.config.handover_s - 1e-6).all()
 
 
 def test_orders_are_only_assigned_to_couriers_on_shift(day_result):
     r = day_result
-    start, end = r.fleet.shift_start_s[r.courier], r.fleet.shift_end_s[r.courier]
-    assert (r.t_assigned >= start - 1e-6).all() and (r.t_assigned < end).all()
+    ok = ~r.rejected
+    start, end = r.fleet.shift_start_s[r.courier[ok]], r.fleet.shift_end_s[r.courier[ok]]
+    assert (r.t_assigned[ok] >= start - 1e-6).all() and (r.t_assigned[ok] < end).all()
 
 
 def test_the_bag_never_exceeds_the_capacity(grid_city, grid_world, grid_paths):
@@ -89,7 +93,7 @@ def test_same_inputs_give_the_same_day(grid_city, grid_world, grid_paths):
     a = S.run_day(grid_city, grid_world, grid_paths, fleet, S.NearestPolicy(), day=3)
     b = S.run_day(grid_city, grid_world, grid_paths, fleet, S.NearestPolicy(), day=3)
     assert S.summarize(a) == S.summarize(b)
-    assert np.array_equal(a.t_delivered, b.t_delivered)
+    assert np.array_equal(a.t_delivered, b.t_delivered, equal_nan=True)
 
 
 def test_one_order_one_courier_follows_the_hand_computed_timeline(grid_city, grid_world, grid_paths):
@@ -129,25 +133,31 @@ def test_b0_prefers_a_free_courier_over_a_nearer_one_that_is_already_loaded(grid
 
 
 def test_orders_wait_in_the_queue_until_a_courier_starts_the_shift(grid_city, grid_world, grid_paths):
-    orders = tiny_orders(grid_world, grid_city, [0], [5], [1000.0])
-    late_fleet = S.Fleet(np.array([2000.0]), np.array([30000.0]), np.array([3], dtype=np.int32))
-    result = run(grid_city, grid_world, grid_paths, late_fleet, orders)
-    assert result.t_assigned[0] == pytest.approx(2000.0)
+    # há um entregador de turno (o primeiro), mas ele está ocupado: o pedido espera na fila
+    orders = tiny_orders(grid_world, grid_city, [0, 0], [5, 6], [1000.0, 1001.0])
+    one = S.Fleet(np.array([0.0]), np.array([30000.0]), np.array([3], dtype=np.int32))
+    cfg = S.SimConfig(capacity=1)
+    result = run(grid_city, grid_world, grid_paths, one, orders, config=cfg)
+    assert not result.rejected.any()
+    assert result.t_assigned[1] >= result.t_delivered[0] - 1e-6  # só entra quando o primeiro sai da mochila
 
 
-def test_an_order_nobody_can_take_is_left_undelivered(grid_city, grid_world, grid_paths):
-    orders = tiny_orders(grid_world, grid_city, [0], [5], [1000.0])
-    gone = S.Fleet(np.array([0.0]), np.array([10.0]), np.array([3], dtype=np.int32))
-    result = run(grid_city, grid_world, grid_paths, gone, orders)
-    assert np.isnan(result.t_delivered[0]) and np.isnan(result.t_assigned[0])
+def test_an_order_with_nobody_on_shift_is_rejected_and_left_out_of_the_metrics(grid_city, grid_world, grid_paths):
+    orders = tiny_orders(grid_world, grid_city, [0, 0], [5, 6], [1000.0, 5000.0])
+    shift = S.Fleet(np.array([3000.0]), np.array([30000.0]), np.array([3], dtype=np.int32))
+    result = run(grid_city, grid_world, grid_paths, shift, orders)
+    assert result.rejected.tolist() == [True, False]
+    assert np.isnan(result.t_delivered[0]) and not np.isnan(result.t_delivered[1])
+    m = S.summarize(result)
+    assert m["delivered"] == 1 and m["unserved"] == 1 and m["rejected_pct"] == pytest.approx(50.0)
 
 
-def test_more_couriers_means_less_waiting(grid_city, grid_world, grid_paths):
-    waits = []
+def test_more_couriers_means_faster_deliveries(grid_city, grid_world, grid_paths):
+    means = []
     for n in (30, 70, 140):
         fleet = S.generate_fleet(grid_world, grid_city, n, seed=7)
-        waits.append(S.summarize(S.run_day(grid_city, grid_world, grid_paths, fleet, S.NearestPolicy(), day=1))["wait_for_courier_mean_min"])
-    assert waits[0] > waits[1] > waits[2]
+        means.append(S.summarize(S.run_day(grid_city, grid_world, grid_paths, fleet, S.NearestPolicy(), day=1))["delivery_mean_min"])
+    assert means[0] > means[1] > means[2]
 
 
 def test_summary_of_a_hand_made_result(day_result):
