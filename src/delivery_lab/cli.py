@@ -10,7 +10,7 @@ import numpy as np
 
 import time
 
-from . import osm, paths, replay, sim, world
+from . import osm, paths, planner, replay, sim, world
 from .city import City, build_city, render_payload
 
 
@@ -64,11 +64,17 @@ def _setup(args: argparse.Namespace):
 
 def cmd_sim(args: argparse.Namespace) -> None:
     city, w, pth, fleet = _setup(args)
-    policy = {"b0": sim.NearestPolicy}[args.policy]()
+    policy = {
+        "b0": sim.NearestPolicy,
+        "b1": planner.Planner, "b2": lambda: planner.Planner(oracle=True),
+        "b1-preparo": lambda: planner.Planner(know_ready=True),
+        "b1-transito": lambda: planner.Planner(know_traffic=True),
+    }[args.policy]()
     keys = ("on_time_pct", "late_mean_min", "late_p90_min", "delivery_mean_min", "delivery_p90_min",
-            "wait_for_courier_mean_min", "wait_at_restaurant_mean_min", "km_per_order", "courier_utilization_pct")
+            "wait_for_courier_mean_min", "wait_at_restaurant_mean_min", "km_per_order", "courier_utilization_pct",
+            "rejected_pct")
     rows, elapsed, events = [], [], 0
-    for day in range(1, args.days + 1):
+    for day in range(args.first_day, args.first_day + args.days):
         start = time.perf_counter()
         result = sim.run_day(city, w, pth, fleet, policy, day)
         elapsed.append(time.perf_counter() - start)
@@ -81,10 +87,13 @@ def cmd_sim(args: argparse.Namespace) -> None:
     unserved = sum(r["unserved"] for r in rows)
     print(f"  pedidos sem entrega: {unserved} de {sum(r['orders'] for r in rows)}")
     print(f"  tempo: {np.mean(elapsed):.2f} s por dia simulado ({events / sum(elapsed):,.0f} eventos por segundo)")
+    if getattr(policy, "decision_s", None):
+        d = np.array(policy.decision_s) * 1000.0
+        print(f"  planejar um pedido (assign): média {d.mean():.2f} ms, P99 {np.percentile(d, 99):.2f} ms, {len(d)} decisões")
     if args.render:
         result = sim.run_day(city, w, pth, fleet, policy, args.render_day, record=True)
         payload = replay.render_replay(result, city, w, policy.name, args.render_day)
-        out = Path(args.render)
+        out = Path(args.render.replace("{policy}", policy.name.lower()))
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
         print(f"replay do dia {args.render_day} -> {out} ({out.stat().st_size / 1e6:.2f} MB)")
@@ -146,12 +155,13 @@ def main(argv: list[str] | None = None) -> None:
 
     sm = sub.add_parser("sim", help="simula a frota").add_subparsers(dest="sim_command", required=True)
     run_sim = sm.add_parser("run", help="roda dias simulados com uma política e mostra as métricas")
-    run_sim.add_argument("--policy", choices=["b0"], default="b0")
+    run_sim.add_argument("--policy", choices=["b0", "b1", "b2", "b1-preparo", "b1-transito"], default="b0")
     run_sim.add_argument("--preset", choices=sorted(world.PRESETS), default="plataforma")
     run_sim.add_argument("--couriers", type=int, default=0, help="sobrescreve o tamanho da frota do preset")
     run_sim.add_argument("--days", type=int, default=10)
+    run_sim.add_argument("--first-day", type=int, default=1, help="primeiro dia simulado (101 a 120 são os dias de teste)")
     run_sim.add_argument("--seed", type=int, default=7)
-    run_sim.add_argument("--render", default="", help="grava o replay de um dia neste arquivo")
+    run_sim.add_argument("--render", default="", help="grava o replay de um dia; {policy} vira b0, b1 ou b2")
     run_sim.add_argument("--render-day", type=int, default=1)
     run_sim.add_argument("--city", default="data/out/city.npz")
     run_sim.add_argument("--paths", default="data/out/paths")
