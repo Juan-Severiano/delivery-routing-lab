@@ -9,6 +9,10 @@
   --focus: #0e7c86;
   --scale-bar: #596070;
 
+  --heat: #d6336c;
+  --shop: #0a7480;
+  --order: #1c5fb8;
+
   --road-trunk: #cf4f1c;
   --road-primary: #c8861c;
   --road-secondary: #8c8676;
@@ -32,6 +36,10 @@
     --accent: #4cc9d6;
     --focus: #4cc9d6;
     --scale-bar: #96a0ae;
+
+    --heat: #ff5d73;
+    --shop: #4cc9d6;
+    --order: #8ec5ff;
 
     --road-trunk: #ff8a4c;
     --road-primary: #e8b34b;
@@ -306,4 +314,123 @@ main {
   h1 {
     font-size: 22px;
   }
+}
+
+/* Passo 2: hora do dia, camadas e dica do restaurante */
+.hour {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.hour-now {
+  min-width: 3ch;
+  font: 600 28px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.stats.compact {
+  grid-template-columns: 1fr 1fr;
+}
+
+.stats .wide {
+  grid-column: 1 / -1;
+}
+
+.stats small {
+  font: 13px var(--font);
+  color: var(--muted);
+}
+
+.swatch.heat {
+  background: linear-gradient(90deg, transparent, var(--heat));
+  border: 1px solid var(--border);
+  height: 8px;
+}
+
+.swatch.dot {
+  height: 10px;
+  width: 10px;
+  justify-self: center;
+  border-radius: 50%;
+}
+
+.swatch.order {
+  background: var(--order);
+  height: 7px;
+  width: 7px;
+}
+
+.swatch.shop {
+  background: var(--shop);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--shop);
+}
+
+.heat-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.ramp {
+  height: 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: linear-gradient(90deg, transparent, var(--heat));
+}
+
+.ramp-labels {
+  display: flex;
+  justify-content: space-between;
+  font: 12px var(--mono);
+  color: var(--muted);
+}
+
+.note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.shop-tip {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 260px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  pointer-events: none;
+}
+
+.shop-tip strong {
+  text-transform: capitalize;
+}
+
+.shop-tip span {
+  color: var(--muted);
+}
+
+.shop-tip em {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--accent);
+  font-style: normal;
 }

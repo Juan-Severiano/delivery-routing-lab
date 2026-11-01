@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toLatLon, type City, type Street } from "./city";
+import {
+  drawHeat,
+  drawOrders,
+  drawRestaurants,
+  nearestRestaurant,
+  type Layers,
+  type View,
+} from "./layers";
+import { formatWindow, type World } from "./world";
 
 interface Camera {
   x: number; // metros, centro da tela
@@ -16,6 +25,9 @@ interface Props {
   city: City;
   visible: boolean[];
   fit: FitRequest;
+  world: World | null;
+  hour: number;
+  layers: Layers;
 }
 
 // Largura real da rua em metros (some quando o zoom é pequeno) e limites em pixels.
@@ -48,10 +60,14 @@ function readPalette(classes: string[]) {
     roads: classes.map((c) => get(`--road-${c}`)),
     text: get("--text"),
     scale: get("--scale-bar"),
+    heat: get("--heat"),
+    shop: get("--shop"),
+    order: get("--order"),
+    ring: get("--bg"),
   };
 }
 
-export function MapCanvas({ city, visible, fit }: Props) {
+export function MapCanvas({ city, visible, fit, world, hour, layers }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const cam = useRef<Camera>({ x: 0, y: 0, scale: 0.05 });
@@ -59,8 +75,10 @@ export function MapCanvas({ city, visible, fit }: Props) {
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const frame = useRef(0);
   const visibleRef = useRef(visible);
+  const worldRef = useRef({ world, hour, layers });
   const palette = useRef(readPalette(city.payload.classes));
   const [cursor, setCursor] = useState<[number, number] | null>(null);
+  const [hover, setHover] = useState<{ index: number; x: number; y: number } | null>(null);
 
   const { classes, bounds, focus } = city.payload;
 
@@ -90,6 +108,13 @@ export function MapCanvas({ city, visible, fit }: Props) {
     const top = y + h / 2 / scale;
     const sx = (wx: number) => (wx - x) * scale + w / 2;
     const sy = (wy: number) => h / 2 - (wy - y) * scale;
+    const view: View = { x, y, scale, w, h };
+    const overlay = worldRef.current;
+
+    // o calor fica por baixo das ruas
+    if (overlay.world && overlay.layers.heat) {
+      drawHeat(ctx, view, overlay.world, overlay.hour, palette.current.heat);
+    }
 
     // da via menor para a maior, para as principais ficarem por cima
     for (let cls = classes.length - 1; cls >= 0; cls--) {
@@ -105,6 +130,13 @@ export function MapCanvas({ city, visible, fit }: Props) {
       ctx.lineWidth = clamp(ROAD_WIDTH_M[name] * scale, ROAD_MIN_PX[name], ROAD_MAX_PX);
       ctx.strokeStyle = palette.current.roads[cls];
       ctx.stroke();
+    }
+
+    if (overlay.world && overlay.layers.orders) {
+      drawOrders(ctx, view, overlay.world, overlay.hour, palette.current.order);
+    }
+    if (overlay.world && overlay.layers.restaurants) {
+      drawRestaurants(ctx, view, overlay.world, overlay.hour, palette.current.shop, palette.current.ring);
     }
 
     drawScaleBar(ctx, h, scale, palette.current.scale, palette.current.text);
@@ -198,6 +230,11 @@ export function MapCanvas({ city, visible, fit }: Props) {
     requestDraw();
   }, [visible, requestDraw]);
 
+  useEffect(() => {
+    worldRef.current = { world, hour, layers };
+    requestDraw();
+  }, [world, hour, layers, requestDraw]);
+
   // tema claro/escuro: relê as cores do CSS
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -245,6 +282,12 @@ export function MapCanvas({ city, visible, fit }: Props) {
     const { w, h } = size.current;
     const { x, y, scale } = cam.current;
     setCursor(toLatLon(city.payload.origin, x + (p.x - w / 2) / scale, y - (p.y - h / 2) / scale));
+    if (world && layers.restaurants && pointers.current.size === 0) {
+      const index = nearestRestaurant(world, { x, y, scale, w, h }, p.x, p.y);
+      setHover(index === null ? null : { index, x: p.x, y: p.y });
+    } else if (hover) {
+      setHover(null);
+    }
     const prev = pointers.current.get(e.pointerId);
     if (!prev) return;
     if (pointers.current.size === 1) {
@@ -298,7 +341,10 @@ export function MapCanvas({ city, visible, fit }: Props) {
       onPointerMove={onPointerMove}
       onPointerUp={onPointerEnd}
       onPointerCancel={onPointerEnd}
-      onPointerLeave={() => setCursor(null)}
+      onPointerLeave={() => {
+        setCursor(null);
+        setHover(null);
+      }}
       onDoubleClick={(e) => {
         const r = e.currentTarget.getBoundingClientRect();
         zoomAt(e.clientX - r.left, e.clientY - r.top, 2);
@@ -318,6 +364,7 @@ export function MapCanvas({ city, visible, fit }: Props) {
           −
         </button>
       </div>
+      {hover && world && <ShopTip world={world} index={hover.index} x={hover.x} y={hover.y} hour={hour} />}
       {cursor && (
         <div className="map-readout" aria-hidden="true">
           {cursor[0].toFixed(5)}, {cursor[1].toFixed(5)}
@@ -332,6 +379,20 @@ export function MapCanvas({ city, visible, fit }: Props) {
       >
         © OpenStreetMap contributors
       </a>
+    </div>
+  );
+}
+
+function ShopTip({ world, index, x, y, hour }: { world: World; index: number; x: number; y: number; hour: number }) {
+  const r = world.payload.restaurants;
+  const online = world.online[hour * r.x.length + index] === 1;
+  return (
+    <div className="shop-tip" style={{ left: x + 14, top: y + 14 }} role="status">
+      <strong>{world.payload.kinds[r.kind[index]]}</strong>
+      <span>{online ? "online agora" : "fora do horário"}</span>
+      <span>online das {formatWindow(r.open_from[index], r.open_until[index])}</span>
+      <span>preparo médio {r.prep_mean_min[index].toFixed(0)} min (fora do pico)</span>
+      <em>visão do simulador: o modelo não vê isso</em>
     </div>
   );
 }
