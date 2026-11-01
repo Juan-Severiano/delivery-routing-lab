@@ -64,11 +64,27 @@ def _setup(args: argparse.Namespace):
 
 def cmd_sim(args: argparse.Namespace) -> None:
     city, w, pth, fleet = _setup(args)
+    def learned(prep: bool, eta_on: bool):
+        from .learn.eta import EtaModel
+        from .learn.prep import PrepModel
+
+        models = Path(args.models)
+        return planner.Planner(
+            prep_model=PrepModel.load(models / "prep.npz") if prep else None,
+            eta_model=EtaModel.load(models / "eta.npz") if eta_on else None,
+            prep_quantile=args.prep_quantile,
+            depart_margin_s=args.margin,
+        )
+
     policy = {
         "b0": sim.NearestPolicy,
-        "b1": planner.Planner, "b2": lambda: planner.Planner(oracle=True),
+        "b1": lambda: planner.Planner(depart_margin_s=args.margin),
+        "b2": lambda: planner.Planner(oracle=True),
         "b1-preparo": lambda: planner.Planner(know_ready=True),
         "b1-transito": lambda: planner.Planner(know_traffic=True),
+        "b1+preparo": lambda: learned(True, False),
+        "b1+eta": lambda: learned(False, True),
+        "b1+": lambda: learned(True, True),
     }[args.policy]()
     keys = ("on_time_pct", "late_mean_min", "late_p90_min", "delivery_mean_min", "delivery_p90_min",
             "wait_for_courier_mean_min", "wait_at_restaurant_mean_min", "km_per_order", "courier_utilization_pct",
@@ -93,10 +109,67 @@ def cmd_sim(args: argparse.Namespace) -> None:
     if args.render:
         result = sim.run_day(city, w, pth, fleet, policy, args.render_day, record=True)
         payload = replay.render_replay(result, city, w, policy.name, args.render_day)
-        out = Path(args.render.replace("{policy}", policy.name.lower()))
+        out = Path(args.render.replace("{policy}", policy.name.lower().replace("+", "plus")))
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
         print(f"replay do dia {args.render_day} -> {out} ({out.stat().st_size / 1e6:.2f} MB)")
+
+
+def _world(args: argparse.Namespace):
+    preset = world.PRESETS[args.preset]
+    city = City.load(Path(args.city))
+    return city, world.generate_world(
+        city, args.seed, preset["restaurants"], preset["orders_per_day"], 4000.0, preset["active_share"]
+    )
+
+
+def cmd_train_prep(args: argparse.Namespace) -> None:
+    from .learn import prep  # só o treino precisa do torch
+
+    city, w = _world(args)
+    start = time.perf_counter()
+    train = prep.build_prep_set(city, w, range(21, 61))
+    val = prep.build_prep_set(city, w, range(61, 71))
+    test = prep.build_prep_set(city, w, range(101, 121))
+    print(f"dados: {len(train)} pedidos de treino (dias 21-60), {len(val)} de validação (61-70), {len(test)} de teste (101-120)")
+    model, history = prep.train_prep(w, train, val, epochs=args.epochs, seed=args.seed)
+    metrics = prep.evaluate_prep(model, test, train)
+    metrics["training_s"] = time.perf_counter() - start
+    out = Path(args.out)
+    model.save(out)
+    out.with_suffix(".json").write_text(json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"melhor época {history.best_epoch}, {metrics['training_s']:.0f} s no total -> {out}")
+    print("erro absoluto médio do preparo nos dias de teste (min):")
+    for name, v in metrics["mae_min"].items():
+        print(f"  {name:<24}{v:6.2f}")
+    print(f"NLL: modelo {metrics['nll']['modelo']:.4f}, verdade do simulador {metrics['nll']['verdade_do_simulador']:.4f}")
+    cal = metrics["calibration"]
+    print("calibração (quantil previsto -> fração observada): " + ", ".join(f"{q:.1f}->{c:.2f}" for q, c in zip(cal["quantiles"], cal["coverage"])))
+    print(f"  erro médio de calibração {cal['mean_abs_error']:.3f}; desvio do log: modelo {metrics['sigma']['modelo_medio']:.3f}, verdade {metrics['sigma']['verdade_media']:.3f}")
+
+
+def cmd_train_eta(args: argparse.Namespace) -> None:
+    from .learn import eta
+
+    city, w = _world(args)
+    pth = paths.Paths.load(city, Path(args.paths))
+    fleet = sim.generate_fleet(w, city, world.PRESETS[args.preset]["couriers"], args.seed)
+    start = time.perf_counter()
+    train = eta.collect_legs(city, w, pth, fleet, range(21, 61))
+    val = eta.collect_legs(city, w, pth, fleet, range(61, 71))
+    test = eta.collect_legs(city, w, pth, fleet, range(101, 121))
+    print(f"dados: {len(train)} trechos de treino (dias 21-60), {len(val)} de validação (61-70), {len(test)} de teste (101-120)")
+    model, history = eta.train_eta(city, train, val, epochs=args.epochs, seed=args.seed)
+    metrics = eta.evaluate_eta(city, model, test, train)
+    metrics["training_s"] = time.perf_counter() - start
+    out = Path(args.out)
+    model.save(out)
+    out.with_suffix(".json").write_text(json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"melhor época {history.best_epoch}, {metrics['training_s']:.0f} s no total -> {out}")
+    print("erro do tempo de um trecho nos dias de teste (todos os trechos | só horas de pico):")
+    for name in ("tempo_livre", "tabela_por_hora", "modelo", "verdade_sem_ruido_de_viagem"):
+        a, b = metrics[name]["todos"], metrics[name]["pico"]
+        print(f"  {name:<28} MAE {a['mae_s']:6.1f} s ({a['mape_pct']:4.1f}%, viés {a['bias_pct']:+5.1f}%) | pico {b['mae_s']:6.1f} s ({b['mape_pct']:4.1f}%, viés {b['bias_pct']:+5.1f}%)")
 
 
 def cmd_world(args: argparse.Namespace) -> None:
@@ -155,17 +228,40 @@ def main(argv: list[str] | None = None) -> None:
 
     sm = sub.add_parser("sim", help="simula a frota").add_subparsers(dest="sim_command", required=True)
     run_sim = sm.add_parser("run", help="roda dias simulados com uma política e mostra as métricas")
-    run_sim.add_argument("--policy", choices=["b0", "b1", "b2", "b1-preparo", "b1-transito"], default="b0")
+    run_sim.add_argument("--policy", choices=["b0", "b1", "b2", "b1-preparo", "b1-transito", "b1+preparo", "b1+eta", "b1+"], default="b0")
+    run_sim.add_argument("--models", default="models", help="pasta dos modelos aprendidos (b1+...)")
+    run_sim.add_argument("--prep-quantile", type=float, default=planner.PREP_QUANTILE, help="quantil do preparo previsto que o b1+ usa")
+    run_sim.add_argument("--margin", type=float, default=None, help="margem de saída em segundos (padrão do planejador)")
     run_sim.add_argument("--preset", choices=sorted(world.PRESETS), default="plataforma")
     run_sim.add_argument("--couriers", type=int, default=0, help="sobrescreve o tamanho da frota do preset")
     run_sim.add_argument("--days", type=int, default=10)
     run_sim.add_argument("--first-day", type=int, default=1, help="primeiro dia simulado (101 a 120 são os dias de teste)")
     run_sim.add_argument("--seed", type=int, default=7)
-    run_sim.add_argument("--render", default="", help="grava o replay de um dia; {policy} vira b0, b1 ou b2")
+    run_sim.add_argument("--render", default="", help="grava o replay de um dia; {policy} vira b0, b1, b1plus ou b2")
     run_sim.add_argument("--render-day", type=int, default=1)
     run_sim.add_argument("--city", default="data/out/city.npz")
     run_sim.add_argument("--paths", default="data/out/paths")
     run_sim.set_defaults(func=cmd_sim)
+
+    tr = sub.add_parser("train", help="treina os modelos próprios (precisa do extra `train`: torch)").add_subparsers(
+        dest="train_command", required=True
+    )
+    train_prep = tr.add_parser("prep", help="modelo de preparo por restaurante e hora")
+    train_prep.add_argument("--preset", choices=sorted(world.PRESETS), default="plataforma")
+    train_prep.add_argument("--seed", type=int, default=7)
+    train_prep.add_argument("--epochs", type=int, default=40)
+    train_prep.add_argument("--city", default="data/out/city.npz")
+    train_prep.add_argument("--out", default="models/prep.npz")
+    train_prep.set_defaults(func=cmd_train_prep)
+
+    train_eta = tr.add_parser("eta", help="modelo de ETA dos trechos")
+    train_eta.add_argument("--preset", choices=sorted(world.PRESETS), default="plataforma")
+    train_eta.add_argument("--seed", type=int, default=7)
+    train_eta.add_argument("--epochs", type=int, default=30)
+    train_eta.add_argument("--city", default="data/out/city.npz")
+    train_eta.add_argument("--paths", default="data/out/paths")
+    train_eta.add_argument("--out", default="models/eta.npz")
+    train_eta.set_defaults(func=cmd_train_eta)
 
     wd = sub.add_parser("world", help="restaurantes e demanda sintéticos").add_subparsers(
         dest="world_command", required=True

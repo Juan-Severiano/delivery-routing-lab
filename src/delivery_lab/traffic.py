@@ -54,6 +54,11 @@ def edge_centrality(city: City) -> np.ndarray:
     return np.exp(-np.hypot(*(mid - center).T) / CENTRALITY_M)
 
 
+def rain_of_day(seed: int, day: int) -> bool:
+    """Se chove no dia `day`. É público (previsão do tempo): os modelos aprendidos podem usar."""
+    return bool(np.random.default_rng([seed, 2, day]).random() < RAIN_PROBABILITY)
+
+
 def build_traffic(city: City, seed: int, day: int) -> Traffic:
     """O trânsito do dia `day`. O mesmo (cidade, semente, dia) devolve sempre o mesmo trânsito."""
     rng = np.random.default_rng([seed, 2, day])

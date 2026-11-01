@@ -13,6 +13,9 @@ O que separa os dois degraus é só o que eles enxergam:
   restaurante (uma regra de bolso). Não vê trânsito nem a hora real em que o pedido fica pronto.
 - **B2**, o teto, usa o tempo real das arestas na hora e a hora exata em que cada pedido fica pronto.
   Só não vê o ruído aleatório de cada viagem (8%), que o simulador sorteia ao despachar.
+- **B1+** é o B1 com os modelos aprendidos no lugar das regras: o preparo previsto por restaurante e
+  hora (`learn.prep`) e o ETA dos trechos (`learn.eta`). Eles só usam o que a plataforma sabe na hora:
+  restaurante, hora, previsão do tempo e posições. Nunca o preparo nem o trânsito verdadeiros.
 
 Os dois seguram a saída do entregador até "chegar quando o pedido fica pronto" e, enquanto ele
 espera, o plano pode mudar (um pedido novo e perto entra antes da coleta).
@@ -33,6 +36,10 @@ K_NEAREST = 40  # entregadores elegíveis mais próximos que são avaliados a ca
 # ganha mais folga. Parâmetros afinados nos dias 1 a 10; as medições do README são dos dias 101 a 120.
 DEPART_MARGIN_B1_S = 150.0
 DEPART_MARGIN_B2_S = 30.0
+# B1+ (preparo aprendido): quantil do preparo previsto e margem, afinados nos dias 1 a 10 (9 combinações,
+# todas entre 91,4% e 91,9% no prazo).
+PREP_QUANTILE = 0.6
+DEPART_MARGIN_LEARNED_S = 30.0
 
 Stop = tuple[int, int]  # (PICKUP ou DROPOFF, pedido)
 
@@ -47,23 +54,32 @@ class Planner:
         depart_margin_s: float | None = None,
         know_ready: bool | None = None,
         know_traffic: bool | None = None,
+        prep_model=None,
+        eta_model=None,
+        prep_quantile: float = PREP_QUANTILE,
     ):
         # `oracle` liga as duas coisas; `know_ready` e `know_traffic` as separam (ablação)
         self.know_ready = oracle if know_ready is None else know_ready
         self.know_traffic = oracle if know_traffic is None else know_traffic
         self.oracle = self.know_ready and self.know_traffic
+        self.prep_model, self.eta_model, self.prep_quantile = prep_model, eta_model, prep_quantile
+        learned = (["preparo"] if prep_model else []) + (["ETA"] if eta_model else [])
         self.name = (
             "B2"
             if self.oracle
-            else "B1" if not (self.know_ready or self.know_traffic)
+            else "B1" if not (self.know_ready or self.know_traffic or learned)
             else "B1 com preparo real" if self.know_ready
-            else "B1 com trânsito real"
+            else "B1 com trânsito real" if self.know_traffic
+            else "B1+" if len(learned) == 2
+            else f"B1+{learned[0]}"
         )
         self.k = k
         self.prep_guess_s = prep_guess_s
         self.late_weight = late_weight
         self.depart_margin_s = depart_margin_s if depart_margin_s is not None else (
-            DEPART_MARGIN_B2_S if self.know_ready else DEPART_MARGIN_B1_S
+            DEPART_MARGIN_B2_S if self.know_ready
+            else DEPART_MARGIN_LEARNED_S if prep_model is not None
+            else DEPART_MARGIN_B1_S
         )
         self.plan: list[list[Stop]] = []
         self.decision_s: list[float] = []  # tempo de cada `assign`, para o profile
@@ -73,8 +89,17 @@ class Planner:
         self.plan = [[] for _ in range(sim.n_couriers)]
         self.created = sim.t_created.tolist()
         self.promised = sim.promised.tolist()
-        # o B2 enxerga a hora real em que o pedido fica pronto; o B1 usa a regra de bolso
-        self.ready = (sim.t_ready if self.know_ready else sim.t_created + self.prep_guess_s).tolist()
+        self.rain = sim.traffic.rain  # previsão do tempo: pública, os modelos aprendidos podem usar
+        # o B2 enxerga a hora real em que o pedido fica pronto; o B1 usa a regra de bolso ou o modelo
+        if self.know_ready:
+            ready = sim.t_ready
+        elif self.prep_model is not None:
+            assert len(self.prep_model.restaurant_kind) == sim.world.n_restaurants, "modelo de outro mundo"
+            rain = np.full(sim.n_orders, self.rain)
+            ready = sim.t_created + self.prep_model.quantile_s(sim.orders.restaurant, sim.t_created, rain, self.prep_quantile)
+        else:
+            ready = sim.t_created + self.prep_guess_s
+        self.ready = ready.tolist()
         self.shop_node = sim.order_restaurant_node.tolist()
         self.home_node = sim.order_customer_node.tolist()
         cfg = sim.config
@@ -91,7 +116,12 @@ class Planner:
     def leg_times(self, sim: Sim, u: np.ndarray, v: np.ndarray) -> np.ndarray:
         """Segundos de u até v, em lote: tempo livre, ou o tempo real das arestas na hora de agora."""
         if not self.know_traffic:
-            return np.asarray(sim.paths.dist[u, v], dtype=float)
+            free = np.asarray(sim.paths.dist[u, v], dtype=float)
+            if self.eta_model is None:
+                return free
+            xy = sim.city.node_xy
+            ratio = self.eta_model.ratio(xy[u], xy[v], free, np.full(len(u), sim.now), np.full(len(u), self.rain))
+            return free * ratio
         seconds = sim.traffic.edge_seconds[int(sim.now // 3600) % 24]
         src, pred = sim.city.edge_src, sim.paths.pred
         total = np.zeros(len(u))

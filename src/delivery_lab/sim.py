@@ -154,6 +154,18 @@ class SimResult:
     config: SimConfig = field(default_factory=SimConfig)
 
 
+def sample_prep(world: World, orders: Orders, rain: bool, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+    """Preparo escondido de cada pedido, em segundos: (média esperada do restaurante na hora, valor sorteado).
+
+    O sorteado é a média × lognormal (dispersão do tipo de restaurante), 10% mais lento com chuva. A
+    média esperada não inclui a chuva: é a que a plataforma usa para prometer o prazo.
+    """
+    r = orders.restaurant
+    hour = (orders.t_s // 3600).astype(int) % 24
+    mean_prep = np.array([world.prep_minutes(h + 0.5) for h in range(24)])[hour, r] * 60.0
+    return mean_prep, mean_prep * (1.1 if rain else 1.0) * rng.lognormal(0.0, world.prep_sigma[r])
+
+
 class Sim:
     def __init__(
         self,
@@ -182,12 +194,9 @@ class Sim:
         self.order_restaurant_node = world.restaurant_node[r]
         self.order_customer_node = orders.customer_node
 
-        # preparo escondido: média do restaurante naquela hora, dispersão lognormal, mais lento com chuva
-        hour = (orders.t_s // 3600).astype(int) % 24
-        mean_prep = np.array([world.prep_minutes(h + 0.5) for h in range(24)])[hour, r] * 60.0
-        rain = 1.1 if traffic.rain else 1.0
+        mean_prep, prep = sample_prep(world, orders, traffic.rain, self.rng)
         self.t_created = orders.t_s.copy()
-        self.t_ready = self.t_created + mean_prep * rain * self.rng.lognormal(0.0, world.prep_sigma[r])
+        self.t_ready = self.t_created + prep
         km = np.hypot(*(self.order_customer_xy - self.order_restaurant_xy).T) / 1000.0
         cfg = self.config
         self.promised = self.t_created + cfg.promise_base_s + mean_prep + cfg.promise_per_km_s * km
