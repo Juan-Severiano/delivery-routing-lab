@@ -8,7 +8,7 @@ A pergunta que guia o projeto: **quanto um modelo treinado consegue se aproximar
 
 ## Estado
 
-Projeto no **Passo 4** (planejadores B1 e B2 contra o B0). Ainda não há modelo aprendido.
+Projeto no **Passo 5** (modelos próprios de preparo e ETA dentro do planejador B1+). Falta a decisão da próxima parada (Jev) e a explicação no mapa.
 
 | | Estado |
 |---|---|
@@ -21,8 +21,12 @@ Projeto no **Passo 4** (planejadores B1 e B2 contra o B0). Ainda não há modelo
 | Baseline B0 (entregador livre mais próximo, parada mais próxima) e métricas por dia | feito |
 | Replay do dia e mapa com entregadores andando, pedidos em aberto e rota do entregador | feito |
 | Planejadores B1 (inserção mais barata + 2-opt, sem ver trânsito nem preparo) e B2 (o teto) | feito |
-| Mapa com a escolha da política (B0, B1, B2) e a comparação do dia | feito |
-| Modelos próprios: ETA, preparo, próxima parada (`decide`), aceite de oferta | não feito |
+| Mapa com a escolha da política (B0, B1, B1+, B2) e a comparação do dia | feito |
+| Biblioteca própria de treino sobre o autograd (rede, Adam, loop, inferência em numpy) | feito |
+| Modelo de preparo por restaurante e hora, como distribuição calibrada | feito |
+| Modelo de ETA dos trechos | feito |
+| B1+ (B1 com os dois modelos no lugar das regras) | feito |
+| Modelos próprios: próxima parada (`decide`) e aceite de oferta | não feito |
 | Explicação da escolha no mapa | não feito |
 
 ## O que é medido (plano)
@@ -36,7 +40,7 @@ Uma escada, não um número solto: o **piso** é o vizinho mais próximo, o **te
 
 ## "Modelo próprio"
 
-PyTorch entra **só como autograd** (`Tensor` e gradiente automático). Camadas, perda, otimizador e loop de treino são escritos aqui. Não usa `torch.nn`, `torch.optim`, scikit-learn, pesos prontos nem LLM. A inferência roda em numpy com os pesos exportados.
+PyTorch entra **só como autograd**: `Tensor`, operações de tensor (produto de matrizes, `tanh`, `exp`) e `backward()`. A rede (com embedding), a inicialização, as perdas, o Adam, o loop de treino e a inferência em numpy estão em `src/delivery_lab/learn/`. Não usa `torch.nn`, `torch.optim`, `torch.utils.data`, scikit-learn, pesos prontos nem LLM. O torch é um extra opcional (`uv sync --extra train`): os pesos treinados ficam em `models/` (~55 KB, versionados) e o simulador e os planejadores rodam só com numpy. Os testes conferem o gradiente do autograd contra diferenças finitas, a inferência em numpy contra o forward do torch e o Adam contra a conta feita à mão.
 
 ## A cidade (Passo 1)
 
@@ -189,18 +193,81 @@ O planejador **é** o gargalo agora: `assign` consome ~90% do tempo do B1 e ~85%
 - A regra de bolso do B1 é uma suposição; uma plataforma de verdade teria algo melhor que "12 min para todos", e é exatamente o que o modelo de preparo vai tentar ser.
 - O resultado "preparo vale mais que trânsito" vale para este simulador e para os parâmetros que escolhi.
 
+## Modelos próprios: preparo e ETA (Passo 5)
+
+A ablação do Passo 4 mostrou o que valia aprender: o **preparo** primeiro, o ETA depois. Os dois modelos treinam em dias simulados e são avaliados em outros: **treino nos dias 21 a 60, validação (parada antecipada) nos 61 a 70, teste nos 101 a 120**. Os dias 1 a 10 ficam para afinar o planejador.
+
+### Preparo por restaurante e hora
+
+A rede recebe o restaurante (embedding de 8 números), o tipo, a hora do dia (3 harmônicos) e se chove, e devolve a **média e o desvio do log do preparo**, treinada com a perda gaussiana. O modelo não sabe que o preparo do simulador é lognormal. Ter uma distribuição permite ao planejador escolher um quantil e permite medir se as probabilidades estão calibradas. O que ele vê é o que uma plataforma tem quando o pedido nasce: o restaurante, a hora e a previsão do tempo. Treina em 7 s no total, contando a geração dos dados (212.389 pedidos).
+
+Erro absoluto médio do preparo nos 106.401 pedidos de teste:
+
+| | Erro (min) |
+|---|---|
+| Regra de bolso do B1 (700 s para todos) | 11,60 |
+| Média global do treino | 9,87 |
+| Tabela tipo de restaurante x hora (mediana do treino) | 5,44 |
+| **Modelo (mediana prevista)** | **4,77** |
+| Piso: a mediana verdadeira do simulador | 4,74 |
+
+O modelo fica a 0,03 min do piso, que é só o ruído do sorteio de cada pedido. A **calibração** também fecha: quando ele prevê o quantil de 10%, 20%, ..., 90%, o preparo observado ficou abaixo em 10,1%, 20,1%, 29,9%, 39,7%, 49,7%, 59,6%, 69,4%, 79,5% e 89,6% dos pedidos (erro médio de 0,003). O desvio do log que ele estima (0,281) bate com o do simulador (0,281).
+
+### ETA dos trechos
+
+A rede prevê o log da razão `tempo real / tempo livre` de um trecho com features baratas, que o planejador monta para milhares de pares por decisão sem reconstruir o caminho: hora, chuva, posições da origem e do destino, tempo livre e distância em linha reta. Treina nos trechos que os entregadores percorreram (390.904 trechos do B0, com o ruído de 8% de cada viagem), em 20 s no total, contando a coleta dos trechos.
+
+Erro do tempo de um trecho nos 195.369 trechos de teste (49% deles em horas de pico):
+
+| | Todos os trechos | Só horas de pico |
+|---|---|---|
+| Tempo livre (o que o B1 usa) | 44,1 s (15,2%, viés -12,2%) | 62,6 s (19,1%, viés -18,0%) |
+| Tabela por hora (razão média do treino) | 31,8 s (10,1%) | 44,3 s (11,3%) |
+| **Modelo** | **23,4 s (8,8%, viés +1,6%)** | **28,3 s (8,9%, viés +0,9%)** |
+| Piso: o tempo real esperado sem o ruído de cada viagem | 17,9 s (6,4%) | 21,6 s (6,4%) |
+
+### B1+: o B1 com os modelos no lugar das regras
+
+O B1+ é o planejador do Passo 4 com o **preparo previsto** (o quantil 0,6, afinado nos dias 1 a 10) no lugar dos 12 min de bolso e o **ETA aprendido** no lugar do tempo livre. Nunca vê o preparo nem o trânsito verdadeiros (um teste confere que as estimativas dele não dependem do preparo verdadeiro). `delivery-lab sim run --policy b1+ --days 20 --first-day 101`, 400 entregadores, nos mesmos 20 dias de teste:
+
+| | B1 | B1 + só preparo | B1 + só ETA | **B1+** | B2 (teto) |
+|---|---|---|---|---|---|
+| Entregues no prazo (%) | 80,6 ± 3,2 | 90,2 ± 3,0 | 81,1 ± 3,1 | **91,2 ± 2,4** | 93,8 ± 1,8 |
+| Atraso médio (min) | 2,0 | 0,6 | 2,0 | 0,6 | 0,4 |
+| Atraso P90 (min) | 6,7 ± 1,8 | 0,5 ± 1,1 | 6,5 ± 1,8 | 0,4 ± 0,8 | 0,0 ± 0,0 |
+| Tempo do pedido, média (min) | 32,8 | 31,8 | 32,6 | 31,2 | 28,0 |
+| Tempo do pedido, P90 (min) | 52,2 | 50,6 | 52,5 | 50,0 | 45,5 |
+| Espera no restaurante (min) | 7,1 | 1,9 | 7,7 | 2,1 | 0,5 |
+| Km rodados por pedido | 3,89 | 4,37 | 3,72 | 4,25 | 4,17 |
+| Planejar um pedido (média) | 0,51 ms | 0,47 ms | 0,69 ms | 0,70 ms | 0,98 ms |
+
+O B1+ **fecha 80% da distância entre o B1 e o teto** (10,6 dos 13,2 pontos). A comparação é pareada, nos mesmos dias: o B1+ ganha do B1 em **20 dos 20 dias** (+10,6 pontos em média, entre +9,4 e +12,6) e fica atrás do B2 nos 20 dias (2,6 pontos em média, entre 1,9 e 4,2). O preparo aprendido responde por quase tudo (9,6 pontos); o ETA sozinho dá só 0,5 e soma 1,0 por cima do preparo, como a ablação do Passo 4 já indicava (o trânsito vale pouco neste simulador). O B1+ roda mais km por pedido que o B1 (4,25 contra 3,89); não investiguei a causa.
+
+Parâmetros afinados **só nos dias 1 a 10**: quantil do preparo (0,5, 0,6 e 0,75) e margem de saída (30, 90 e 150 s), 9 combinações, todas entre 91,4% e 91,9% no prazo; ficaram 0,6 e 30 s.
+
+### Suposições e limites do Passo 5
+
+- **Os modelos aprendem o que o nosso simulador gera.** O preparo é lognormal com média por tipo e hora, e o trânsito tem uma forma simples; chegar no piso mostra que o treino funciona, não que preparo ou trânsito reais sejam tão previsíveis. Com operação real haveria mudança de comportamento, dados faltantes e muito mais ruído.
+- O rótulo do preparo é **limpo**: supomos que a plataforma saiba exatamente quando o pedido ficou pronto. Na vida real ele seria censurado pela chegada do entregador.
+- O treino de preparo inclui os pedidos que o aplicativo recusaria por falta de entregador de turno (0,8%).
+- A previsão do tempo (chuva) é tratada como pública: os dois modelos e o B1+ a usam.
+- O ETA é treinado com trechos do B0; um planejador diferente passa por pares de nós em outra distribuição.
+- O modelo de preparo depende do mundo com que foi treinado (600 restaurantes, semente 7): outro mundo exige treinar de novo (o planejador confere).
+
 ## Como rodar
 
 Requer [uv](https://docs.astral.sh/uv/) e Node 20.19 ou mais novo.
 
 ```bash
-uv sync --extra dev
+uv sync --extra dev --extra train   # --extra train só é preciso para treinar (instala o torch, ~580 MB)
 uv run delivery-lab city fetch      # baixa as ruas do Overpass (um pedido, ~7 MB)
 uv run delivery-lab city build      # grafo + JSON do mapa
 uv run delivery-lab world build     # restaurantes, demanda e JSON do mapa (--preset dev para o pequeno)
 uv run delivery-lab paths build     # caminhos mínimos entre todos os cruzamentos (~20 s, ~320 MB, não versionado)
-uv run delivery-lab sim run --policy b2 --days 20 --first-day 101   # métricas de 20 dias de teste (b0, b1, b2)
-uv run delivery-lab sim run --policy b1 --days 1 --first-day 101 --render-day 101 --render 'web/public/data/replay-{policy}.json'   # replay para o mapa (repita com b0 e b2)
+uv run delivery-lab train prep      # modelo de preparo (7 s) -> models/prep.npz
+uv run delivery-lab train eta       # modelo de ETA (20 s) -> models/eta.npz
+uv run delivery-lab sim run --policy b2 --days 20 --first-day 101   # métricas de 20 dias de teste (b0, b1, b1+, b2)
+uv run delivery-lab sim run --policy b1 --days 1 --first-day 101 --render-day 101 --render 'web/public/data/replay-{policy}.json'   # replay para o mapa (repita com b0, b1+ e b2)
 uv run pytest
 npm --prefix web install
 npm --prefix web run dev            # http://localhost:5173
