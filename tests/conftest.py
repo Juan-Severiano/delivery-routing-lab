@@ -26,3 +26,18 @@ def grid_city(tmp_path_factory):
     path = Path(tmp_path_factory.mktemp("osm")) / "grid.json"
     path.write_text(json.dumps({"elements": elements}))
     return build_city(read_osm(path))[0]
+
+
+@pytest.fixture(scope="session")
+def grid_paths(grid_city):
+    from delivery_lab.paths import Paths, apsp_python
+
+    dist, pred = apsp_python(grid_city)
+    return Paths(grid_city, dist, pred)
+
+
+@pytest.fixture(scope="session")
+def grid_world(grid_city):
+    from delivery_lab import world as w
+
+    return w.generate_world(grid_city, seed=7, restaurants=40, orders_per_day=900, active_share=1.0)
