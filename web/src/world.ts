@@ -43,7 +43,7 @@ function isOnline(from: number, until: number, hour: number): boolean {
   return (from <= hour && hour < until) || (until > 24 && hour + 24 < until);
 }
 
-export async function loadWorld(url = "/data/world.json"): Promise<World> {
+export async function loadWorld(url = `${import.meta.env.BASE_URL}data/world.json`): Promise<World> {
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`não achei ${url} (HTTP ${res.status}). Rode: uv run delivery-lab world build`);

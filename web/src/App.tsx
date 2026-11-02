@@ -63,7 +63,7 @@ export function App() {
   const [city, setCity] = useState<City | null>(null);
   const [world, setWorld] = useState<World | null>(null);
   const [replays, setReplays] = useState<Partial<Record<PolicyId, Replay>>>({});
-  const [policy, setPolicy] = useState<PolicyId>("b1plus");
+  const [policy, setPolicy] = useState<PolicyId>(import.meta.env.MODE === "pages" ? "jev" : "b1plus");
   const [error, setError] = useState<string | null>(null);
   const [visible, setVisible] = useState<boolean[]>([]);
   const [fit, setFit] = useState<FitRequest>({ target: "focus", nonce: 0 });
@@ -84,7 +84,7 @@ export function App() {
       .catch(fail);
     loadWorld().then(setWorld).catch(fail);
     for (const id of POLICIES) {
-      loadReplay(`/data/replay-${id}.json`)
+      loadReplay(`${import.meta.env.BASE_URL}data/replay-${id}.json`)
         .then((r) => setReplays((all) => ({ ...all, [id]: r })))
         .catch(fail);
     }
@@ -177,6 +177,7 @@ export function App() {
             As ruas são reais, do OpenStreetMap. Restaurantes, pedidos, entregadores e trânsito são{" "}
             <strong>sintéticos</strong>, gerados pelo simulador.
           </p>
+          {import.meta.env.MODE === "pages" && <p><a href="../">Ver método e resultados</a></p>}
         </header>
 
         {error && (
@@ -438,7 +439,7 @@ export function App() {
         )}
 
         <footer>
-          <p>Passo 5: modelos próprios de preparo e ETA no B1+. Próximo: o Jev e a explicação da escolha.</p>
+          <p>Preparo e ETA aprendidos, cinco políticas comparáveis e decisões do Jev explicadas no mapa.</p>
         </footer>
       </aside>
 

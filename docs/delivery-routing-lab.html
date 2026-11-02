@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Laboratório de roteamento de entregadores sobre ruas reais de Itapipoca: simulação, baselines, modelos próprios e decisões explicáveis, com resultados reproduzíveis.">
+  <meta name="color-scheme" content="light">
+  <title>delivery-routing-lab | Simulação, aprendizado e rotas explicáveis</title>
+  <link rel="canonical" href="https://juan-severiano.github.io/delivery-routing-lab/">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="pt_BR">
+  <meta property="og:url" content="https://juan-severiano.github.io/delivery-routing-lab/">
+  <meta property="og:title" content="delivery-routing-lab | Simulação, aprendizado e rotas explicáveis">
+  <meta property="og:description" content="Explore cinco políticas de despacho nas ruas reais de Itapipoca, com operação sintética, modelos próprios e resultados reproduzíveis em 20 dias de teste.">
+  <meta property="og:image" content="https://juan-severiano.github.io/delivery-routing-lab/assets/mapa-visao-geral.jpg">
+  <meta property="og:image:alt" content="Mapa do laboratório com ruas do OpenStreetMap e entregadores e pedidos sintéticos em Itapipoca, Ceará.">
+  <meta property="og:image:width" content="1280">
+  <meta property="og:image:height" content="720">
+  <meta name="twitter:card" content="summary_large_image">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>if (window.tailwind) { tailwind.config = { corePlugins: { preflight: false } }; }</script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root{--ink:#132b37;--muted:#536570;--line:#dbe4e7;--paper:#f6f8f7;--brand-600:#087f83;--brand-700:#086369;--tint:#e9f5f3;--navy:#102932;--orange:#f1ad4b}
+    *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:24px}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.7 Inter,system-ui,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}a{color:var(--brand-700);text-underline-offset:4px}a:hover{color:#03494e}a:focus-visible{outline:3px solid #e8a13d;outline-offset:5px}h1,h2,h3,p,figure,dl{margin:0}h1,h2,h3{line-height:1.18;letter-spacing:-.035em}h1{font-size:clamp(36px,5.2vw,62px);font-weight:800;max-width:900px}h2{font-size:clamp(27px,3.2vw,37px);font-weight:700}h3{font-size:19px;font-weight:700}p+p{margin-top:16px}code,pre,.mono{font-family:"JetBrains Mono",ui-monospace,monospace}code{font-size:.87em;overflow-wrap:anywhere}img{display:block;max-width:100%;height:auto}strong{font-weight:700}button,a{-webkit-tap-highlight-color:transparent}.shell{width:min(1120px,calc(100% - 64px));margin:auto}.skip{position:absolute;top:-70px;left:16px;padding:10px 16px;background:white;z-index:4}.skip:focus{top:12px}.topbar{padding:23px 0;border-bottom:1px solid var(--line)}.topbar .shell{display:flex;gap:20px;align-items:center;justify-content:space-between}.wordmark{font-size:13px;letter-spacing:-.02em;text-decoration:none;font-weight:600;color:var(--ink)}.wordmark .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--brand-600);margin-right:10px}.topnav{display:flex;flex-wrap:wrap;gap:22px;font-size:12px;font-weight:600}.topnav a{text-decoration:none;color:var(--muted)}.topnav a:hover{color:var(--brand-700)}.hero{padding:66px 0 42px}.eyebrow{font-size:11px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--brand-700);margin-bottom:20px}.lead{max-width:780px;font-size:18px;line-height:1.65;color:var(--muted);margin-top:24px}.hero-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:28px}.button{display:inline-flex;align-items:center;justify-content:center;gap:9px;padding:11px 18px;border:1px solid var(--line);border-radius:7px;text-decoration:none;color:var(--ink);font-size:13px;font-weight:600;background:white}.button.primary{background:var(--brand-700);border-color:var(--brand-700);color:white}.button:hover{border-color:var(--brand-600);color:var(--brand-700)}.button.primary:hover{background:#064e53;color:white}.hero-meta{display:flex;gap:12px 25px;flex-wrap:wrap;margin-top:30px;font-size:12px;color:var(--muted)}.hero-meta span{display:flex;align-items:center;gap:7px}.hero-meta i{color:var(--brand-600)}.warning{display:flex;gap:12px;border:1px solid #ead8b9;border-radius:8px;background:#fff7e8;padding:15px 18px;color:#695029;font-size:13px;line-height:1.6;margin-top:30px}.warning i{margin-top:4px;color:#9d6816}.warning strong{color:#563e18}.cover-map{padding:0 0 18px}.screen{display:block;border:1px solid #263b43;border-radius:10px;overflow:hidden;background:#0d1217}.screen img{width:100%}.caption{font-size:12px;color:var(--muted);line-height:1.65;padding-top:12px}.metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin:30px 0 0;border:1px solid var(--line);border-radius:10px;background:white;overflow:hidden}.metric{padding:25px 28px}.metric+.metric{border-left:1px solid var(--line)}.metric dt{font-size:11px;letter-spacing:.09em;text-transform:uppercase;font-weight:700;color:var(--muted)}.metric dd{margin:9px 0;font-size:41px;line-height:1.1;font-weight:700;letter-spacing:-.05em;color:var(--brand-700);font-variant-numeric:tabular-nums}.metric small{display:block;font-size:12px;line-height:1.6;color:var(--muted)}.section{padding:60px 0;border-bottom:1px solid var(--line)}.section-heading{display:flex;align-items:center;gap:16px;margin-bottom:27px}.section-number{flex:none;display:flex;align-items:center;justify-content:center;width:35px;height:35px;border-radius:8px;background:var(--brand-600);color:white;font:500 12px "JetBrains Mono",monospace}.section-intro{max-width:850px;margin-bottom:25px;color:var(--muted);font-size:16px}.chart{padding:13px;background:white;border:1px solid var(--line);border-radius:9px;overflow:hidden}.chart img{width:100%}.chart-grid{display:grid;grid-template-columns:1fr;gap:32px;margin-top:32px}.finding{display:grid;grid-template-columns:160px 1fr;gap:25px;align-items:start;margin-top:28px;padding:24px;border:1px solid var(--line);border-radius:9px;background:white}.finding-label{font:500 11px/1.7 "JetBrains Mono",monospace;letter-spacing:.06em;text-transform:uppercase;color:var(--brand-700)}.finding p{font-size:14px;line-height:1.75}.finding strong{color:var(--ink)}.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:9px;background:white}table{width:100%;border-collapse:collapse;text-align:left;font-size:13px}th,td{padding:14px 17px;border-bottom:1px solid var(--line);vertical-align:top}th{background:#edf2f2;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700}tbody tr:last-child td{border-bottom:0}td:first-child{font-weight:700;white-space:nowrap}td:last-child{font-variant-numeric:tabular-nums;white-space:nowrap}.highlight td{background:var(--tint)}.subnote{font-size:12px;color:var(--muted);line-height:1.7;margin-top:15px}.screens-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:28px}.screens-grid figure{min-width:0}.screens-grid .screen{border-radius:7px}.screen-title{font-size:15px;margin-bottom:12px;letter-spacing:-.02em}.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin:28px 0}.step{position:relative;background:white;border:1px solid var(--line);border-radius:9px;padding:22px 18px}.step:not(:last-child)::after{content:"→";position:absolute;right:-14px;top:32px;background:var(--paper);font-size:17px;color:var(--brand-600);z-index:1}.step .index{font:500 10px "JetBrains Mono",monospace;color:var(--brand-700);letter-spacing:.09em;margin-bottom:15px}.step h3{font-size:15px;letter-spacing:-.015em;margin-bottom:10px}.step p{font-size:12px;color:var(--muted);line-height:1.7}.stack{display:flex;flex-wrap:wrap;gap:9px;margin-top:21px}.stack span{font-size:11px;font-weight:500;background:#edf2f2;border:1px solid var(--line);padding:5px 10px;border-radius:5px}.split{display:grid;grid-template-columns:1fr 1fr;gap:35px}.split h3{margin-bottom:17px}.detail-list{padding-left:20px;margin:0;color:var(--muted);font-size:14px}.detail-list li+li{margin-top:11px}.dark-code{background:var(--navy);color:#bcf2dc;padding:23px;border-radius:9px;overflow-x:auto;font:12px/1.9 "JetBrains Mono",monospace;white-space:pre;margin:22px 0 0}.dark-code .comment{color:#9bb3bd}.callout{display:flex;gap:12px;padding:19px 21px;border:1px solid #b9dcda;border-radius:9px;background:var(--tint);font-size:14px;line-height:1.7;margin-top:27px}.callout i{color:var(--brand-700);margin-top:4px}.link-list{list-style:none;padding:0;margin:23px 0 0;display:grid;grid-template-columns:1fr 1fr;gap:11px 24px}.link-list a{display:block;padding:13px 15px;background:white;border:1px solid var(--line);border-radius:7px;font-size:12px;text-decoration:none;font-weight:600}.link-list a:hover{border-color:var(--brand-600)}.link-list i{margin-right:9px}.footer{padding:30px 0 45px;display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;color:var(--muted);font-size:11px}.footer a{color:var(--muted)}.bg-brand-600{background:var(--brand-600)}.text-brand-600{color:var(--brand-600)}.text-brand-700{color:var(--brand-700)}.print-only{display:none}
+    @media(max-width:760px){.shell{width:calc(100% - 36px)}.topbar{padding:18px 0}.topbar .shell{align-items:flex-start;flex-direction:column;gap:14px}.topnav{gap:20px}.hero{padding-top:39px}.lead{font-size:16px}.metric{padding:22px 16px}.metric dd{font-size:33px}.metric dt{font-size:9px}.metric small{font-size:11px}.section{padding:39px 0}.section-heading{gap:12px}.finding{grid-template-columns:1fr;gap:12px;padding:20px}.screens-grid,.split{grid-template-columns:1fr}.steps{grid-template-columns:1fr 1fr}.step:nth-child(2)::after{content:none}.step:last-child::after{content:none}.link-list{grid-template-columns:1fr}.chart{padding:5px}.section-intro{font-size:15px}}
+    @media(max-width:430px){.metric-grid{grid-template-columns:1fr}.metric{display:grid;grid-template-columns:100px 1fr;gap:0 15px;padding:17px 20px}.metric+.metric{border-left:0;border-top:1px solid var(--line)}.metric dt{grid-column:2;align-self:end;font-size:10px}.metric dd{grid-column:1;grid-row:1/3;align-self:center;margin:0;font-size:36px}.metric small{grid-column:2;font-size:11px}.steps{grid-template-columns:1fr}.step:not(:last-child)::after{content:none}.button{padding:10px 14px}}
+    @media print{@page{size:A4;margin:17mm 15mm}html{scroll-behavior:auto}body{font-size:10pt;background:white;line-height:1.55}.shell{width:100%}.topbar,.hero-actions,.topnav,.skip{display:none}.hero{padding-top:15px}.hero h1{font-size:34pt;max-width:100%}.lead{font-size:12pt;line-height:1.6}.hero-meta{font-size:9pt}.warning{font-size:9pt;margin-top:20px}.cover-map{break-inside:avoid}.metric-grid{margin-top:18px;break-inside:avoid}.metric{padding:18px}.metric dd{font-size:29pt}.metric dt{font-size:8pt}.metric small{font-size:9pt}.page-break{break-before:page}.section{border:0;padding:8px 0 12px}.section-heading{margin-bottom:20px}h2{font-size:23pt}h3{font-size:13pt}p,li{orphans:3;widows:3}.section-intro{font-size:10.5pt}figure,.finding,.callout,.steps,.split,.table-wrap{break-inside:avoid}.chart-grid{gap:20px}.chart{padding:4px}.chart img{max-height:72mm;object-fit:contain}.screens-grid{gap:15px}.screens-grid .caption,.caption{font-size:8pt}.screen{border-radius:6px}.steps{gap:9px}.step{padding:15px 12px}.step h3{font-size:10pt}.step p{font-size:8pt}.step .index{font-size:7pt}.step:not(:last-child)::after{right:-10px;font-size:11pt;background:white}.finding{margin-top:18px;padding:16px;grid-template-columns:100px 1fr;gap:16px}.finding p,.detail-list,.callout{font-size:9.5pt}.finding-label{font-size:8pt}.split{gap:23px}.dark-code{font-size:8pt;padding:18px}.link-list a{font-size:8pt;padding:9px 11px}.link-list{gap:8px 14px}.subnote{font-size:8pt}th,td{padding:9px 12px;font-size:9pt}th{font-size:7.5pt}a{color:inherit;text-decoration:none}.footer{padding-top:18px;font-size:8pt}.print-only{display:inline}.no-print{display:none}}
+  </style>
+</head>
+<body>
+  <a class="skip" href="#conteudo">Ir para o conteúdo</a>
+  <header class="topbar">
+    <div class="shell">
+      <a class="wordmark mono" href="https://github.com/Juan-Severiano/delivery-routing-lab"><span class="dot" aria-hidden="true"></span>delivery-routing-lab</a>
+      <nav class="topnav" aria-label="Navegação da apresentação">
+        <a href="#resultados">Resultados</a><a href="mapa/">Mapa interativo</a><a href="#arquitetura">Arquitetura</a><a href="#reproduzir">Reproduzir</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="conteudo" class="shell">
+    <div class="hero cover-page">
+      <p class="eyebrow">Engenharia de ML · Simulação · Avaliação</p>
+      <h1>Roteamento de entregadores em Itapipoca.</h1>
+      <p class="lead">Quanto vale aprender o tempo de preparo de um pedido? E acertar a próxima parada de um planejador melhora a frota? Um laboratório com baselines, modelos próprios e um mapa para examinar as decisões.</p>
+      <div class="hero-actions">
+        <a class="button primary" href="mapa/"><i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>Explorar o mapa</a>
+        <a class="button" href="https://github.com/Juan-Severiano/delivery-routing-lab"><i class="fa-brands fa-github" aria-hidden="true"></i>Ver o código</a>
+      </div>
+      <p class="subnote">Replay sintético do dia 101, com cinco políticas de despacho. A primeira abertura do mapa carrega cerca de 17 MB; aguarde os dados antes de explorar.</p>
+      <div class="hero-meta">
+        <span><i class="fa-solid fa-code" aria-hidden="true"></i>Francisco Juan Severiano</span>
+        <span><i class="fa-solid fa-location-dot" aria-hidden="true"></i>Itapipoca, Ceará</span>
+        <span><i class="fa-solid fa-calendar" aria-hidden="true"></i>Resultados: novembro de 2026</span>
+      </div>
+      <div class="warning" role="note">
+        <i class="fa-solid fa-flask" aria-hidden="true"></i>
+        <p><strong>Experimento com dados operacionais sintéticos.</strong> As ruas vêm do OpenStreetMap. Restaurantes, pedidos, entregadores, trânsito e preparo são gerados pelo simulador. Os resultados abaixo não medem uma operação real.</p>
+      </div>
+    </div>
+
+    <figure class="cover-map">
+      <a href="assets/mapa-visao-geral.jpg" class="screen" aria-label="Abrir captura completa do mapa do laboratório"><img src="assets/mapa-visao-geral.jpg" alt="Captura real do laboratório: ruas de Itapipoca, entregadores e pedidos sintéticos, relógio e seleção das cinco políticas de despacho." width="1280" height="720" fetchpriority="high"></a>
+      <figcaption class="caption">Replay de um dia simulado no mapa React. O painel permite comparar as políticas no mesmo dia; os resultados agregados usam 20 dias de teste.</figcaption>
+    </figure>
+
+    <dl class="metric-grid" aria-label="Três resultados principais, com métricas distintas">
+      <div class="metric"><dt>B1+ · operação simulada</dt><dd>91,2%</dd><small>Entregas no prazo, contra 80,6% do B1. Modelos de preparo e ETA no lugar das regras.</small></div>
+      <div class="metric"><dt>Jev · imitação offline</dt><dd>95,3%</dd><small>Escolhas iguais às do B2 em 129.013 decisões. Essa métrica não é a taxa de entregas no prazo.</small></div>
+      <div class="metric"><dt>B2 · referência privilegiada</dt><dd>93,8%</dd><small>Entregas no prazo conhecendo preparo e trânsito reais do simulador. Usa heurística; não é um ótimo global.</small></div>
+    </dl>
+
+    <section id="resultados" class="section page-break" aria-labelledby="resultados-title">
+      <div class="section-heading"><span class="section-number bg-brand-600" aria-hidden="true">01</span><h2 id="resultados-title">O que mudou na frota</h2></div>
+      <p class="section-intro">A comparação mantém cidade, demanda, turnos e mochila de até três pedidos. Muda a política de despacho e a informação que ela pode usar.</p>
+      <div class="table-wrap">
+        <table>
+          <caption class="skip">Políticas e médias de entregas no prazo nos dias simulados 101 a 120</caption>
+          <thead><tr><th scope="col">Política</th><th scope="col">Como decide</th><th scope="col">No prazo</th></tr></thead>
+          <tbody>
+            <tr><td>B0</td><td>Entregador e próxima parada mais próximos.</td><td>78,6%</td></tr>
+            <tr><td>B1</td><td>Inserção e 2-opt; tempo livre das vias e preparo fixo.</td><td>80,6%</td></tr>
+            <tr class="highlight"><td>B1+</td><td>O planejador B1 com preparo e ETA aprendidos.</td><td>91,2%</td></tr>
+            <tr><td>Jev linear</td><td>Atribuição do B1+; próxima parada escolhida pelo modelo.</td><td>91,3%</td></tr>
+            <tr><td>B2</td><td>Planejador com preparo e trânsito verdadeiros do simulador.</td><td>93,8%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="subnote">Médias entre os dias de teste 101 a 120; 400 entregadores, semente 7. Por política: 106.401 pedidos, 105.511 entregues e 890 sem entrega (0,84%). Pontualidade considera os entregues. As hastes são desvios entre dias, não intervalos de confiança. B2 é uma referência privilegiada, não um ótimo global.</p>
+      <div class="chart-grid">
+        <figure><div class="chart"><img src="assets/politicas-no-prazo.svg" width="1180" height="680" alt="Gráfico comparando entregas no prazo: B0 78,6%, B1 80,6%, B1+ 91,2%, Jev 91,3% e B2 93,8%, com dispersão entre dias." loading="lazy"></div><figcaption class="caption">O ganho principal vem de substituir as estimativas fixas pelos modelos aprendidos. Acrescentar o Jev não demonstrou ganho operacional relevante sobre o B1+ neste cenário.</figcaption></figure>
+        <figure><div class="chart"><img src="assets/ablacao-preparo-eta.svg" width="1180" height="680" alt="Comparação de configurações com preparo e ETA aprendidos; as variantes com preparo também usam uma margem de saída diferente." loading="lazy"></div><figcaption class="caption">A configuração com preparo aprendido concentra o ganho. Ela também usa quantil 0,6 e margem de saída de 30 s, contra 150 s do B1 e da variante só com ETA; ajustes feitos nos dias 1 a 10. A comparação não isola o modelo mantendo a margem fixa.</figcaption></figure>
+      </div>
+      <div class="finding"><p class="finding-label">Achado principal</p><p><strong>Uma previsão melhor de preparo teve mais valor que sofisticar a próxima parada.</strong> O B1+ melhora cerca de 10,6 pontos percentuais sobre o B1. Isso orienta onde investir no modelo; a importância relativa do ETA pode mudar com outro trânsito ou outra demanda.</p></div>
+    </section>
+
+    <section id="jev" class="section page-break" aria-labelledby="jev-title">
+      <div class="section-heading"><span class="section-number bg-brand-600" aria-hidden="true">02</span><h2 id="jev-title">Imitar bem não garante uma frota melhor</h2></div>
+      <p class="section-intro">O Jev aprende a escolher a próxima parada imitando decisões do B2, usando apenas as informações disponíveis à plataforma. A avaliação compara tanto essa imitação offline quanto a política dirigindo seus próprios estados na simulação.</p>
+      <figure><div class="chart"><img src="assets/jev-imitacao-operacao.svg" width="1180" height="680" alt="Duas avaliações distintas: a rede imita o B2 melhor que o modelo linear, mas não melhora a taxa de entregas no prazo da frota." loading="lazy"></div><figcaption class="caption">O linear acerta 95,3% das escolhas do B2; a rede acerta 96,5%. Na frota, os resultados são aproximadamente 91,3% e 91,0% no prazo. A acurácia de imitação, sozinha, não escolhe a melhor política.</figcaption></figure>
+      <div class="finding"><p class="finding-label">Decisão técnica</p><p><strong>Manter o linear como a versão explicável do Jev.</strong> Ele apresenta desempenho operacional próximo ao B1+ e permite decompor exatamente sua pontuação por fator. A rede pequena aumenta a complexidade sem demonstrar vantagem operacional neste experimento.</p></div>
+      <div class="callout"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><p>A explicação mostra <strong>o que pesou na pontuação do modelo</strong>. Não prova o que causaria um atraso no mundo real. Probabilidade de escolha também não significa probabilidade de entregar no prazo.</p></div>
+    </section>
+
+    <section id="mapa" class="section page-break" aria-labelledby="mapa-title">
+      <div class="section-heading"><span class="section-number bg-brand-600" aria-hidden="true">03</span><h2 id="mapa-title">Examinar uma decisão no mapa</h2></div>
+      <p class="section-intro">O replay mostra o relógio do dia, pedidos em aberto e o trecho percorrido por cada entregador. Ao selecionar um entregador na política Jev, aparecem as candidatas da decisão, suas probabilidades e a contribuição dos fatores.</p>
+      <div class="callout"><i class="fa-solid fa-map-location-dot" aria-hidden="true"></i><p><a href="mapa/"><strong>Explore o mapa interativo</strong></a>: avance o relógio, alterne entre B0, B1, B1+, Jev e B2 e clique nos entregadores. As cinco políticas reproduzem o mesmo dia sintético, 101; as médias de 20 dias estão nos gráficos desta página.</p></div>
+      <div class="screens-grid">
+        <figure><h3 class="screen-title">Próxima parada e fatores</h3><a class="screen" href="assets/mapa-decisao-jev.jpg" aria-label="Abrir captura completa da decisão do Jev"><img src="assets/mapa-decisao-jev.jpg" alt="Captura real do mapa com um entregador selecionado, rota, candidatas da decisão do Jev e painel de probabilidades e fatores." width="954" height="943" loading="lazy"></a><figcaption class="caption">Entregador 162 às 12:30: última decisão às 12:26, com duas candidatas (86% e 14%). O linear decompõe a pontuação por fator; o entregador já chegou ao restaurante na captura.</figcaption></figure>
+        <figure><h3 class="screen-title">Demanda e distribuição espacial</h3><a class="screen" href="assets/mapa-calor.jpg" aria-label="Abrir captura completa do mapa de calor"><img src="assets/mapa-calor.jpg" alt="Captura real do mapa com a camada de calor da demanda sintética sobre as ruas de Itapipoca." width="954" height="943" loading="lazy"></a><figcaption class="caption">Demanda das 12h, em células de 250 m: média de 30 dias simulados, semente 7. A legenda usa a mesma escala entre horas. Não é a contagem dos pedidos abertos no replay.</figcaption></figure>
+      </div>
+      <p class="subnote">As imagens são capturas da aplicação em execução. O mapa desenha arquivos locais de ruas e replay em canvas. Veja as <a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/docs/capturas.md">condições e os passos para reproduzir as capturas</a>.</p>
+    </section>
+
+    <section id="arquitetura" class="section page-break" aria-labelledby="arquitetura-title">
+      <div class="section-heading"><span class="section-number bg-brand-600" aria-hidden="true">04</span><h2 id="arquitetura-title">Do grafo à decisão</h2></div>
+      <p class="section-intro">O simulador e o avaliador ficam separados da visualização. Assim, o mesmo dia pode ser executado com políticas diferentes e inspecionado depois no navegador.</p>
+      <div class="steps" role="list" aria-label="Fluxo de dados do laboratório">
+        <article class="step" role="listitem"><p class="index">01 / CIDADE</p><h3>Ruas reais</h3><p>OpenStreetMap, grafo conectado e caminhos mínimos pelo tempo livre das vias.</p></article>
+        <article class="step" role="listitem"><p class="index">02 / MUNDO</p><h3>Simulação por eventos</h3><p>Semente fixa gera restaurantes, pedidos, turnos, preparo e trânsito escondidos.</p></article>
+        <article class="step" role="listitem"><p class="index">03 / POLÍTICA</p><h3>Comparar e aprender</h3><p>Baselines, modelos de preparo e ETA, escolha de próxima parada pelo Jev.</p></article>
+        <article class="step" role="listitem"><p class="index">04 / AVALIAÇÃO</p><h3>Métricas e replay</h3><p>Resultados por dia, gráficos e JSON estático para o mapa React.</p></article>
+      </div>
+      <div class="split">
+        <div><h3>Modelos próprios</h3><p>Rede, inicialização, Adam e laço de treino implementados no projeto. PyTorch fornece tensores e autograd; o cálculo de inferência usa NumPy. Os imports atuais ainda exigem instalar o extra <code>train</code> para executar as políticas aprendidas.</p></div>
+        <div><h3>Interface entre as partes</h3><p>A política responde <code>assign</code> e <code>next_stop</code>. O Jev devolve probabilidades, confiança, margem e contribuições. A interface lê cidade, mundo e replays em JSON; o mapa não participa da decisão.</p></div>
+      </div>
+      <div class="stack" aria-label="Tecnologias usadas"><span>Python 3.12+</span><span>NumPy</span><span>PyTorch / autograd</span><span>React</span><span>TypeScript</span><span>Vite</span><span>Canvas 2D</span><span>OpenStreetMap</span></div>
+    </section>
+
+    <section id="metodo" class="section page-break" aria-labelledby="metodo-title">
+      <div class="section-heading"><span class="section-number bg-brand-600" aria-hidden="true">05</span><h2 id="metodo-title">Como ler os resultados</h2></div>
+      <div class="split">
+        <div><h3>Protocolo de avaliação</h3><ul class="detail-list"><li>Planejador ajustado nos dias 1 a 10; teste da frota nos dias 101 a 120.</li><li>Preparo e ETA: treino nos dias 21 a 60; validação nos dias 61 a 70.</li><li>Jev: decisões do B2 nos dias 21 a 50 para treino e 61 a 65 para validação; teste nos dias 101 a 120.</li><li>Comparação das políticas nos mesmos dias e com a mesma configuração. Média e dispersão entre dias não são intervalo de confiança.</li></ul></div>
+        <div><h3>Limites do experimento</h3><ul class="detail-list"><li>Um mundo sintético, com semente 7. Os modelos aprendem as regras e o ruído definidos pelo simulador.</li><li>O preparo possui rótulos limpos; uma operação real teria dados faltantes, mudanças de comportamento e observações censuradas.</li><li>B2 recebe informação privilegiada, mas usa uma heurística. Imitá-lo não estabelece um limite matemático de desempenho.</li><li>Qualidade do Jev avaliada com mochila de três pedidos. Oferta e aceite não foram modelados.</li></ul></div>
+      </div>
+      <div class="callout"><i class="fa-solid fa-magnifying-glass-chart" aria-hidden="true"></i><p><strong>O próximo teste útil é desafiar as suposições.</strong> Variar demanda, trânsito e ruído de preparo pode mostrar quando cada política deixa de funcionar. Validar em outra distribuição é necessário antes de extrapolar os números.</p></div>
+    </section>
+
+    <section id="reproduzir" class="section page-break" aria-labelledby="reproduzir-title">
+      <div class="section-heading"><span class="section-number bg-brand-600" aria-hidden="true">06</span><h2 id="reproduzir-title">Código, dados e reprodução</h2></div>
+      <p class="section-intro">O <a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/README.md">README</a> contém o preparo do ambiente, a geração do grafo e dos cinco replays e os comandos para abrir o mapa. Os modelos treinados são versionados; a demonstração usa um snapshot congelado, com dados e recorte OSM disponíveis para download.</p>
+      <pre class="dark-code"><code><span class="comment"># Na raiz do repositório: recriar gráficos do snapshot versionado</span>
+uv run --with matplotlib python scripts/plot_results.py
+
+<span class="comment"># Fonte dos números e protocolo detalhado</span>
+docs/resultados.json
+docs/metodologia.md</code></pre>
+      <p class="subnote">Recriar os gráficos a partir do snapshot não refaz o experimento. A coleta completa exige o ambiente e os dados preparados conforme o README; o script documenta a opção <code>--collect</code>. Os gráficos não fazem chamadas a modelos pagos.</p>
+      <ul class="link-list">
+        <li><a href="https://github.com/Juan-Severiano/delivery-routing-lab"><i class="fa-brands fa-github" aria-hidden="true"></i>Repositório público</a></li>
+        <li><a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/README.md"><i class="fa-solid fa-play" aria-hidden="true"></i>README e início rápido</a></li>
+        <li><a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/docs/metodologia.md"><i class="fa-solid fa-book-open" aria-hidden="true"></i>Metodologia e comandos</a></li>
+        <li><a href="resultados.json"><i class="fa-solid fa-database" aria-hidden="true"></i>Resultados usados nos gráficos</a></li>
+        <li><a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/scripts/plot_results.py"><i class="fa-solid fa-chart-column" aria-hidden="true"></i>Script de coleta e gráficos</a></li>
+        <li><a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/LICENSE"><i class="fa-solid fa-scale-balanced" aria-hidden="true"></i>Licença MIT do código</a></li>
+        <li><a href="dados/manifest.json">Dados públicos e hashes do mapa</a></li>
+        <li><a href="dados/itapipoca-roads.osm.json.gz">Recorte OpenStreetMap de origem</a></li>
+      </ul>
+    </section>
+    <footer class="footer"><p>Francisco Juan Severiano · delivery-routing-lab · 01/11/2026</p><p>Ruas: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> · ODbL</p></footer>
+  </main>
+</body>
+</html>

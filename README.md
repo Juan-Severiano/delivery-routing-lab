@@ -1,359 +1,163 @@
 # delivery-routing-lab
 
-Laboratório de roteamento de entregadores sobre as **ruas reais de Itapipoca (CE)**: um simulador de frota, baselines clássicos e um modelo próprio medido contra eles, com um mapa para ver onde cada entregador está, qual rota ele segue e por que o modelo escolheu a próxima parada.
+**[Demo e resultados](https://juan-severiano.github.io/delivery-routing-lab/)** · **[Abrir o mapa interativo](https://juan-severiano.github.io/delivery-routing-lab/mapa/)**
 
-> **Os dados são sintéticos.** Só as ruas vêm do OpenStreetMap. Restaurantes, pedidos, entregadores, trânsito e tempos de preparo serão gerados pelo simulador; nada aqui vem de operação real nem de cardápio ou cliente de lojista.
+**Quando mandar um entregador buscar um pedido que ainda está sendo preparado?** Este laboratório compara regras clássicas e modelos aprendidos para atribuir pedidos e escolher a próxima parada sobre as ruas de Itapipoca (CE).
 
-A pergunta que guia o projeto: **quanto um modelo treinado consegue se aproximar de um planejador caro que conhece o trânsito de verdade, respondendo em microssegundos?**
+Em 20 dias simulados, prever preparo e tempo de viagem elevou as entregas no prazo de **80,6% para 91,2%** frente ao mesmo planejador com regras fixas. O **Jev**, modelo linear que explica a próxima parada, ficou em **91,3%**: resultado próximo ao B1+, sem ganho operacional demonstrado.
 
-## Estado
+> **Dados operacionais sintéticos.** Só as ruas vêm do OpenStreetMap. Restaurantes, pedidos, entregadores, turnos, preparo e trânsito são gerados pelo simulador. Os resultados não são de uma operação comercial.
 
-Projeto no **Passo 6** (o Jev: a próxima parada com probabilidades e a explicação no mapa). Falta a oferta e o aceite.
+![Mapa do dia simulado, com ruas de Itapipoca, entregadores e pedidos em andamento](docs/assets/mapa-visao-geral.jpg)
 
-| | Estado |
-|---|---|
-| Ruas de Itapipoca (baixar do OSM, montar o grafo, maior componente conectada) | feito |
-| Mapa em Vite/React com pan, zoom e camadas por classe de via | feito |
-| Restaurantes sintéticos, curva de demanda por hora e pedidos do dia (por semente) | feito |
-| Mapa de calor de demanda e restaurantes online por hora no mapa | feito |
-| Caminhos mínimos entre todos os cruzamentos (Python puro) | feito |
-| Trânsito escondido, ciclo do pedido, entregadores com turno e mochila, simulador por eventos | feito |
-| Baseline B0 (entregador livre mais próximo, parada mais próxima) e métricas por dia | feito |
-| Replay do dia e mapa com entregadores andando, pedidos em aberto e rota do entregador | feito |
-| Planejadores B1 (inserção mais barata + 2-opt, sem ver trânsito nem preparo) e B2 (o teto) | feito |
-| Mapa com a escolha da política (B0, B1, B1+, Jev, B2) e a comparação do dia | feito |
-| Biblioteca própria de treino sobre o autograd (rede, Adam, loop, inferência em numpy) | feito |
-| Modelo de preparo por restaurante e hora, como distribuição calibrada | feito |
-| Modelo de ETA dos trechos | feito |
-| B1+ (B1 com os dois modelos no lugar das regras) | feito |
-| O Jev: `decide(estado)` com probabilidade por parada, confiança e peso de cada fator | feito |
-| Explicação da escolha no mapa (candidatas, probabilidades, fatores) | feito |
-| Modelo de aceite de oferta | não feito |
+[Apresentação visual](docs/delivery-routing-lab.html) · [Metodologia completa](docs/metodologia.md) · [Resultados por dia](docs/resultados.json) · [Executar o mapa](#executar-o-mapa)
 
-## O que é medido (plano)
+## O experimento
 
-Uma escada, não um número solto: o **piso** é o vizinho mais próximo, o **teto** é o planejador com os tempos reais, e o modelo próprio tem de ficar no meio.
+As cinco políticas recebem os mesmos dias de pedidos e a mesma frota. O que muda é a informação disponível e como atribuem pedidos ou escolhem paradas.
 
-- Manchete: **% de entregas no prazo** e **atraso P90**.
-- Junto: tempo total do pedido, distância da frota, erro do ETA em minutos, calibração das probabilidades e latência do `decide()`.
-- Semente fixa, dias de treino separados dos de teste e variação entre sementes.
-- O modelo imita o teto, então provavelmente **não o supera**. O que se mede é quanto chega perto e quanto mais rápido responde.
-
-## "Modelo próprio"
-
-PyTorch entra **só como autograd**: `Tensor`, operações de tensor (produto de matrizes, `tanh`, `exp`) e `backward()`. A rede (com embedding), a inicialização, as perdas, o Adam, o loop de treino e a inferência em numpy estão em `src/delivery_lab/learn/`. Não usa `torch.nn`, `torch.optim`, `torch.utils.data`, scikit-learn, pesos prontos nem LLM. O torch é um extra opcional (`uv sync --extra train`): os pesos treinados ficam em `models/` (~55 KB, versionados) e o simulador e os planejadores rodam só com numpy. Os testes conferem o gradiente do autograd contra diferenças finitas, a inferência em numpy contra o forward do torch e o Adam contra a conta feita à mão.
-
-## A cidade (Passo 1)
-
-Medido sobre o recorte baixado do OSM (município inteiro de Itapipoca, só vias dirigíveis):
-
-| | |
-|---|---|
-| Vias lidas / trechos entre cruzamentos | 4.187 / 10.170 |
-| Cruzamentos antes e depois da maior componente fortemente conectada | 7.345 → 7.288 (99,2%) |
-| Arestas dirigidas | 19.320 |
-| Extensão (cada rua contada uma vez) | 2.594 km |
-| Semáforos marcados no OSM | 23 |
-
-Por classe: residencial 706 km, sem classe (`unclassified`) 1.501 km, terciária 118 km, secundária 68 km, principal 176 km, rodovia 25 km. A maior parte do `unclassified` é estrada rural; a demanda simulada vai se concentrar no miolo urbano, mas o grafo cobre o município todo.
-
-### Suposições e limites
-
-- **A velocidade livre é suposição, não medição.** Só 99 das 4.187 vias têm `maxspeed` no OSM. Sem ele, o laboratório usa um padrão por classe (de 25 km/h em rua residencial a 60 km/h em rodovia), pensando em moto. O trânsito real do simulador será outra função, que o modelo não vê diretamente.
-- O OSM pode ter ruas faltando, mão única mal marcada e classes imprecisas. O grafo é tão bom quanto o mapa.
-- Rampas e alças (`*_link`) andam a 70% da velocidade da via principal; é uma regra do laboratório.
-- Calçadas, trilhas, vias de serviço e a pista de corrida ficam de fora.
-
-## Restaurantes e demanda (Passo 2)
-
-O mundo sintético é gerado por semente (`delivery-lab world build`). Medido com a semente 7 no preset `plataforma`, em 30 dias simulados, neste Mac (Apple Silicon, 16 GB):
-
-| | |
-|---|---|
-| Restaurantes cadastrados / ativos / pico online | 600 / 347 / 205 (das 18h às 21h) |
-| Pedidos por dia (atendidos) | média 5.337, de 5.189 a 5.485 |
-| Pedidos sem restaurante online no raio de 4 km | 3,5% (191 por dia), quase todos de madrugada |
-| Hora de pico | 19h, 745 pedidos por hora (14,0% do dia); às 12h, 568 |
-| Distância cliente-restaurante, em linha reta | mediana 1.478 m, P90 3.196 m, máximo 4.000 m |
-| Restaurantes a menos de 2 km / 4 km do centro urbano | 72% / 93% |
-| Preparo médio no pico contra a madrugada | 1,44 vezes |
-| Tempo para gerar o mundo / amostrar um dia de pedidos | 0,023 s / 0,057 s |
-
-O preset `dev` (40 restaurantes, ~900 pedidos por dia) existe para testes rápidos. Os dois presets são só parâmetros: `--restaurants`, `--orders` e `--radius` sobrescrevem.
-
-Como o mundo é montado:
-
-- **Restaurantes** ficam em cruzamentos do miolo urbano, com mais chance perto do centro e das avenidas. Cada um tem um tipo (marmita, restaurante, lanchonete, pizzaria, açaí e sorvete, espetinho, dia todo), uma janela online e um perfil de preparo **escondido**: tempo médio e dispersão, que crescem no pico de demanda. O modelo nunca verá esse perfil, só os horários de criado e pronto.
-- **Pedidos** seguem uma curva por minuto (almoço, lanche da tarde, jantar e noite) e um endereço sorteado pela densidade de cruzamentos. O restaurante é escolhido entre os online dentro do raio, com peso de popularidade vezes `exp(-distância / 2 km)`.
-- **Mapa de calor** é a média de 30 dias simulados por célula de 250 m e por hora, não uma fórmula.
-
-### Suposições e limites
-
-- **Todos os parâmetros do mundo são suposições do laboratório**: parcelas de cada tipo, janelas online, tempos de preparo, curva horária, popularidade e a escala de 600 cadastrados e ~5.500 pedidos por dia. Nada disso foi medido em operação real.
-- A densidade de cruzamentos é um proxy da população; não é um censo.
-- As distâncias deste passo são em linha reta. O caminho pelas ruas entra no simulador (Passo 3).
-- Pedidos que não acham restaurante online no raio são descartados e contados à parte.
-
-## Simulador e o baseline B0 (Passo 3)
-
-Um dia simulado por semente: pedidos do Passo 2, entregadores com turno e mochila de 3 pedidos, trânsito escondido e preparo escondido. O B0 é o **piso** da escada: o pedido vai para o entregador **livre** mais próximo (se ninguém está livre, o mais próximo com espaço) e cada entregador faz sempre a parada mais próxima. Distâncias em linha reta. Ele não olha trânsito nem preparo, então manda o entregador no instante em que o pedido nasce e ele espera no restaurante.
-
-**Todas as medições deste README são de 20 dias de teste (dias 101 a 120)**, nunca usados para escolher parâmetro. Média ± desvio entre dias, preset `plataforma` (~5.300 pedidos por dia):
-
-| B0 com N entregadores | 300 | 400 | 550 |
-|---|---|---|---|
-| Entregues no prazo (%) | 65,2 ± 3,4 | **78,6 ± 4,1** | 91,5 ± 2,7 |
-| Atraso médio (min) | 11,4 ± 1,4 | 3,7 ± 1,0 | 1,0 ± 0,4 |
-| Atraso P90 (min) | 40,1 ± 4,2 | 12,5 ± 4,3 | 0,6 ± 1,2 |
-| Tempo do pedido, média (min) | 44,0 ± 2,1 | 34,1 ± 2,1 | 28,9 ± 1,4 |
-| Tempo do pedido, P90 (min) | 86,4 ± 4,0 | 61,4 ± 4,1 | 47,8 ± 2,6 |
-| Espera no restaurante (min) | 11,7 | 14,5 | 17,6 |
-| Km rodados por pedido | 4,96 | 4,88 | 4,43 |
-| Utilização dos entregadores (%) | 80,1 | 68,7 | 54,3 |
-
-A frota de **400 é a usada nas medições**: com 300 o piso fica saturado (80% de utilização) e com 550 sobra gente; em 400 há folga para um planejador melhorar. A **espera no restaurante cresce com a frota** (11,7, 14,5, 17,6 min): é o desperdício que o B0 não evita. Pedidos criados quando **nenhum entregador está de turno** são recusados e ficam fora das métricas: 890 dos 106.401 pedidos (0,84%, ~45 por dia, todos de madrugada); os outros 105.511 foram entregues.
-
-Como o dia é montado:
-
-- **Caminho** é o de menor tempo livre (comprimento / velocidade livre da classe), calculado uma vez para todos os pares de cruzamentos e guardado. O entregador não escolhe outro caminho por causa do trânsito.
-- **Tempo real** de cada aresta = tempo livre × `(1 + 1,0 × pico(hora) × centralidade × sensibilidade da classe × chuva)` × ruído por zona de 1 km (AR(1) ao longo das horas) × fator do dia, mais um ruído de 8% por viagem. O pico tem três picos (manhã fraca, almoço, fim de tarde), a centralidade cai com `exp(-distância ao centro / 2,5 km)` e chove em 20% dos dias.
-- **Preparo** de cada pedido: média do restaurante naquela hora (mais lento no pico) × lognormal, mais 10% com chuva.
-- **Prazo prometido** = criado + 10 min + preparo médio esperado + 6 min por km em linha reta restaurante-cliente. É a regra do laboratório; ela afeta o nível de "no prazo" de todos os degraus, não a comparação entre eles.
-- **Turnos:** 25% almoço (10h a 14h30), 25% dia todo (10h a 23h), 50% noite (17h30 à 1h), com ±30 min de variação por entregador.
-- Retirada leva 60 s, entrega 60 s, e o pedido conta como entregue 45 s depois da chegada ao cliente.
-
-### Desempenho do simulador
-
-Medido neste Mac (Apple Silicon, 16 GB), Python 3.14, sem biblioteca de grafos:
-
-| | |
-|---|---|
-| Caminhos mínimos, 7.288 origens (Dijkstra com `heapq`) | 18,1 s, 2,5 ms por origem (uma vez; 212 MB de tempos e 106 MB de predecessoras em disco) |
-| Um dia simulado com o B0, ~5.300 pedidos e 400 entregadores | 0,23 s (~120 mil eventos por segundo) |
-| O dobro da escala (~10.700 pedidos, 800 entregadores) | 0,46 s |
-| Mapa: posição dos 400 entregadores + pedidos em aberto por quadro | 0,03 ms |
-
-### Suposições e limites do Passo 3
-
-- **Todo o trânsito, o preparo, os turnos e o prazo são suposições do laboratório**; nada foi medido em operação real. O modelo vai aprender o que o simulador gera.
-- O tempo real de uma aresta, medido em 20 dias, vai de 0,73 a 2,49 vezes o tempo livre (1% das arestas-hora abaixo de 0,88): o ruído de zona e do dia pode deixá-la mais rápida que o "livre", que é uma referência e não um teto físico.
-- O B0 mede a posição do entregador no fim do trecho em curso, não a posição exata naquele instante.
-- Só um dia (o dia 101) vai para o replay do mapa; as métricas são de 20 dias.
-
-## Planejadores B1 e B2 (Passo 4)
-
-Os dois usam a mesma máquina: cada entregador tem um plano (as paradas que ainda não começou). Quando um pedido nasce, o planejador testa, para os **40 entregadores elegíveis mais próximos**, todas as posições em que a coleta e a entrega cabem no plano (a entrega depois da coleta, até 3 pedidos) e fica com a que menos piora o custo. Depois o **2-opt** (inverter um trecho do plano) melhora a ordem das paradas daquele entregador. O custo de um plano é a soma, sobre os pedidos dele, do tempo desde a criação até a entrega mais **3 vezes** o atraso sobre o prazo prometido. Os dois também **seguram a saída** do entregador até "chegar quando o pedido fica pronto", e um pedido novo e perto pode entrar antes de uma coleta que ainda está cozinhando.
-
-O que separa os degraus é só o que cada um enxerga:
-
-- **B1** estima tempos pelo tempo livre das ruas e supõe ~12 min de preparo para qualquer restaurante (uma regra de bolso). Não vê trânsito nem a hora real em que o pedido fica pronto.
-- **B2**, o teto, usa o tempo real das arestas na hora e a hora exata em que cada pedido fica pronto. Só não vê o ruído de 8% de cada viagem, sorteado quando ele despacha.
-
-`delivery-lab sim run --policy b0|b1|b2 --days 20 --first-day 101`, 400 entregadores:
-
-| | B0 (piso) | B1 | B2 (teto) |
-|---|---|---|---|
-| Entregues no prazo (%) | 78,6 ± 4,1 | 80,6 ± 3,2 | **93,8 ± 1,8** |
-| Atraso médio (min) | 3,7 ± 1,0 | 2,0 ± 0,4 | 0,4 ± 0,1 |
-| Atraso P90 (min) | 12,5 ± 4,3 | 6,7 ± 1,8 | 0,0 ± 0,0 |
-| Tempo do pedido, média (min) | 34,1 ± 2,1 | 32,8 ± 1,3 | 28,0 ± 1,0 |
-| Tempo do pedido, P90 (min) | 61,4 ± 4,1 | 52,2 ± 2,1 | 45,5 ± 1,8 |
-| Espera no restaurante (min) | 14,5 | 7,1 | 0,5 |
-| Km rodados por pedido | 4,88 | 3,89 | 4,17 |
-| Planejar um pedido (média / P99) | | 0,54 / 1,21 ms | 1,04 / 2,00 ms |
-| Tempo por dia simulado | 0,23 s | 3,15 s | 6,44 s |
-
-A leitura: o B1 já corta a espera no restaurante pela metade e 20% dos km, mas **a taxa no prazo quase não sobe** (+2,0 pontos). O B2 sobe 15,2 pontos sobre o piso. Para dar uma régua de negócio: o B0 com **550 entregadores** (~37% a mais) ainda fica abaixo do B2 com 400 (91,5% contra 93,8%).
-
-### Quanto vale saber cada coisa
-
-Mesmos 20 dias, mesma frota, mesmo planejador; só muda o que ele enxerga:
-
-| | B1 | B1 + preparo real | B1 + trânsito real | B2 (os dois) |
-|---|---|---|---|---|
-| Entregues no prazo (%) | 80,6 ± 3,2 | **92,9 ± 2,2** | 81,2 ± 3,2 | 93,8 ± 1,8 |
-| Atraso P90 (min) | 6,7 | 0,2 | 6,5 | 0,0 |
-| Tempo do pedido, média (min) | 32,8 | 28,4 | 32,6 | 28,0 |
-| Espera no restaurante (min) | 7,1 | 0,2 | 7,6 | 0,5 |
-
-**Saber a hora em que o pedido fica pronto vale quase todo o ganho do teto** (12,3 dos 13,2 pontos); saber o trânsito vale 0,6 ponto. Neste simulador, portanto, o modelo de **preparo** é o que mais pode render, e o ETA tem pouco a ganhar. Isso depende da força do trânsito sintético, que é um parâmetro nosso (o tempo dobra no pico, no centro, numa avenida); com trânsito mais forte o ETA valeria mais.
-
-### O quanto o planejador é bom
-
-- **Contra a força bruta:** em 1.000 instâncias aleatórias de 3 pedidos (cidade de brinquedo em grade, metade com os tempos do B1, metade com os do B2), a inserção mais barata seguida de 2-opt acha o **plano ótimo em 85%** dos casos; em média custa **0,92% a mais**, no pior caso 30%. Reprodutível com `OPTIMALITY_INSTANCES=1000 uv run pytest -s -k close_to_the_optimum`.
-- **Parâmetros afinados só nos dias 1 a 10**, nunca nos 101 a 120. Candidatos: com 10, 20, 40 e 80 o B1 fez 76,7%, 78,2%, 79,2% e 80,0% no prazo, a 0,16, 0,28, 0,53 e 1,06 ms por decisão (medido antes de corrigir os turnos da abertura; a tendência se repetiu depois); fiquei com 40. Regra de bolso do B1: de 600 a 800 s o resultado fica dentro de 0,3 ponto (80,8%, 81,0%, 80,7%), 900 s perde 0,8 e 1.200 s perde 4,8; fiquei com 700 s. Margem de saída: 150 s no B1 (60 s e 300 s deram 0,1 e 0,5 ponto a menos) e 30 s no B2 (de 0 a 90 s ele muda menos de 0,2 ponto). Peso do atraso: 3 (com 1 ou 8 o B2 muda menos de 0,2 ponto).
-
-### Desempenho e a decisão sobre Go
-
-O planejador **é** o gargalo agora: `assign` consome ~90% do tempo do B1 e ~85% do B2 (105.511 decisões em 20 dias; 0,54 e 1,04 ms em média). Mesmo assim, 20 dias de B2 rodam em ~2 minutos, então **Go continua sem justificativa**. A pergunta volta se o Passo 6 precisar de muitas centenas de dias de decisões do B2 como dado de treino; antes de Go, o próximo passo seria vetorizar mais em numpy.
-
-### Suposições e limites do Passo 4
-
-- O B2 é um **teto no sentido de "vê tudo, menos o ruído da viagem"**, não um ótimo: ele usa heurística (inserção + 2-opt, só 40 candidatos) e custo próprio, e o ótimo global não foi calculado.
-- O B2 mede o trânsito na hora em que decide, não na hora em que cada trecho de fato acontece.
-- A regra de bolso do B1 é uma suposição; uma plataforma de verdade teria algo melhor que "12 min para todos", e é exatamente o que o modelo de preparo vai tentar ser.
-- O resultado "preparo vale mais que trânsito" vale para este simulador e para os parâmetros que escolhi.
-
-## Modelos próprios: preparo e ETA (Passo 5)
-
-A ablação do Passo 4 mostrou o que valia aprender: o **preparo** primeiro, o ETA depois. Os dois modelos treinam em dias simulados e são avaliados em outros: **treino nos dias 21 a 60, validação (parada antecipada) nos 61 a 70, teste nos 101 a 120**. Os dias 1 a 10 ficam para afinar o planejador.
-
-### Preparo por restaurante e hora
-
-A rede recebe o restaurante (embedding de 8 números), o tipo, a hora do dia (3 harmônicos) e se chove, e devolve a **média e o desvio do log do preparo**, treinada com a perda gaussiana. O modelo não sabe que o preparo do simulador é lognormal. Ter uma distribuição permite ao planejador escolher um quantil e permite medir se as probabilidades estão calibradas. O que ele vê é o que uma plataforma tem quando o pedido nasce: o restaurante, a hora e a previsão do tempo. Treina em 7 s no total, contando a geração dos dados (212.389 pedidos).
-
-Erro absoluto médio do preparo nos 106.401 pedidos de teste:
-
-| | Erro (min) |
-|---|---|
-| Regra de bolso do B1 (700 s para todos) | 11,60 |
-| Média global do treino | 9,87 |
-| Tabela tipo de restaurante x hora (mediana do treino) | 5,44 |
-| **Modelo (mediana prevista)** | **4,77** |
-| Piso: a mediana verdadeira do simulador | 4,74 |
-
-O modelo fica a 0,03 min do piso, que é só o ruído do sorteio de cada pedido. A **calibração** também fecha: quando ele prevê o quantil de 10%, 20%, ..., 90%, o preparo observado ficou abaixo em 10,1%, 20,1%, 29,9%, 39,7%, 49,7%, 59,6%, 69,4%, 79,5% e 89,6% dos pedidos (erro médio de 0,003). O desvio do log que ele estima (0,281) bate com o do simulador (0,281).
-
-### ETA dos trechos
-
-A rede prevê o log da razão `tempo real / tempo livre` de um trecho com features baratas, que o planejador monta para milhares de pares por decisão sem reconstruir o caminho: hora, chuva, posições da origem e do destino, tempo livre e distância em linha reta. Treina nos trechos que os entregadores percorreram (390.904 trechos do B0, com o ruído de 8% de cada viagem), em 20 s no total, contando a coleta dos trechos.
-
-Erro do tempo de um trecho nos 195.369 trechos de teste (49% deles em horas de pico):
-
-| | Todos os trechos | Só horas de pico |
+| Política | Como decide | Informação usada |
 |---|---|---|
-| Tempo livre (o que o B1 usa) | 44,1 s (15,2%, viés -12,2%) | 62,6 s (19,1%, viés -18,0%) |
-| Tabela por hora (razão média do treino) | 31,8 s (10,1%) | 44,3 s (11,3%) |
-| **Modelo** | **23,4 s (8,8%, viés +1,6%)** | **28,3 s (8,9%, viés +0,9%)** |
-| Piso: o tempo real esperado sem o ruído de cada viagem | 17,9 s (6,4%) | 21,6 s (6,4%) |
+| **B0: regra simples** | Atribui ao entregador livre mais próximo; visita a parada mais próxima | Distância em linha reta; sem estimativa de preparo ou trânsito |
+| **B1: planejador clássico** | Inserção de coleta e entrega no plano, seguida de 2-opt; pode adiar a saída | Tempo livre das ruas e regra fixa de 700 s de preparo |
+| **B1+: previsões aprendidas** | Mesmo planejador, trocando regras pelos modelos de preparo e ETA | Restaurante, hora, previsão de chuva, posições e histórico sintético |
+| **Jev: próxima parada explicada** | Atribui como B1+; um modelo linear escolhe a próxima parada e devolve probabilidades e contribuições dos fatores | Mesmas estimativas acessíveis ao B1+; aprende a imitar B2 |
+| **B2: referência privilegiada** | Mesma heurística de inserção e 2-opt | Preparo verdadeiro e trânsito corrente do simulador; não conhece o ruído da viagem |
 
-### B1+: o B1 com os modelos no lugar das regras
+**B2 não é o ótimo global nem um limite matemático.** Ele serve para medir a diferença observada que informação melhor pode fazer dentro desta heurística e deste ambiente.
 
-O B1+ é o planejador do Passo 4 com o **preparo previsto** (o quantil 0,6, afinado nos dias 1 a 10) no lugar dos 12 min de bolso e o **ETA aprendido** no lugar do tempo livre. Nunca vê o preparo nem o trânsito verdadeiros (um teste confere que as estimativas dele não dependem do preparo verdadeiro). `delivery-lab sim run --policy b1+ --days 20 --first-day 101`, 400 entregadores, nos mesmos 20 dias de teste:
+## Resultados principais
 
-| | B1 | B1 + só preparo | B1 + só ETA | **B1+** | B2 (teto) |
-|---|---|---|---|---|---|
-| Entregues no prazo (%) | 80,6 ± 3,2 | 90,2 ± 3,0 | 81,1 ± 3,1 | **91,2 ± 2,4** | 93,8 ± 1,8 |
-| Atraso médio (min) | 2,0 | 0,6 | 2,0 | 0,6 | 0,4 |
-| Atraso P90 (min) | 6,7 ± 1,8 | 0,5 ± 1,1 | 6,5 ± 1,8 | 0,4 ± 0,8 | 0,0 ± 0,0 |
-| Tempo do pedido, média (min) | 32,8 | 31,8 | 32,6 | 31,2 | 28,0 |
-| Tempo do pedido, P90 (min) | 52,2 | 50,6 | 52,5 | 50,0 | 45,5 |
-| Espera no restaurante (min) | 7,1 | 1,9 | 7,7 | 2,1 | 0,5 |
-| Km rodados por pedido | 3,89 | 4,37 | 3,72 | 4,25 | 4,17 |
-| Planejar um pedido (média) | 0,51 ms | 0,47 ms | 0,69 ms | 0,70 ms | 0,98 ms |
+Preset `plataforma`, semente 7, 400 entregadores e capacidade de 3 pedidos. Médias dos **mesmos 20 dias de teste (101 a 120)**; `±` é o desvio padrão entre dias, não um intervalo de confiança.
 
-O B1+ **fecha 80% da distância entre o B1 e o teto** (10,6 dos 13,2 pontos). A comparação é pareada, nos mesmos dias: o B1+ ganha do B1 em **20 dos 20 dias** (+10,6 pontos em média, entre +9,4 e +12,6) e fica atrás do B2 nos 20 dias (2,6 pontos em média, entre 1,9 e 4,2). O preparo aprendido responde por quase tudo (9,6 pontos); o ETA sozinho dá só 0,5 e soma 1,0 por cima do preparo, como a ablação do Passo 4 já indicava (o trânsito vale pouco neste simulador). O B1+ roda mais km por pedido que o B1 (4,25 contra 3,89); não investiguei a causa.
+Cada política recebeu **106.401 pedidos**: 105.511 foram entregues e 890 ficaram sem entrega (0,84%). A pontualidade considera apenas os entregues; os totais e as métricas de cada dia estão no [snapshot](docs/resultados.json).
 
-Parâmetros afinados **só nos dias 1 a 10**: quantil do preparo (0,5, 0,6 e 0,75) e margem de saída (30, 90 e 150 s), 9 combinações, todas entre 91,4% e 91,9% no prazo; ficaram 0,6 e 30 s.
-
-### Suposições e limites do Passo 5
-
-- **Os modelos aprendem o que o nosso simulador gera.** O preparo é lognormal com média por tipo e hora, e o trânsito tem uma forma simples; chegar no piso mostra que o treino funciona, não que preparo ou trânsito reais sejam tão previsíveis. Com operação real haveria mudança de comportamento, dados faltantes e muito mais ruído.
-- O rótulo do preparo é **limpo**: supomos que a plataforma saiba exatamente quando o pedido ficou pronto. Na vida real ele seria censurado pela chegada do entregador.
-- O treino de preparo inclui os pedidos que o aplicativo recusaria por falta de entregador de turno (0,8%).
-- A previsão do tempo (chuva) é tratada como pública: os dois modelos e o B1+ a usam.
-- O ETA é treinado com trechos do B0; um planejador diferente passa por pares de nós em outra distribuição.
-- O modelo de preparo depende do mundo com que foi treinado (600 restaurantes, semente 7): outro mundo exige treinar de novo (o planejador confere).
-
-## O Jev: a próxima parada com probabilidades (Passo 6)
-
-Quando um entregador fica livre, o Jev escolhe a **próxima parada** entre as candidatas viáveis (coletas pendentes e entregas de pedidos já coletados) e diz por quê. É um contrato, `decide(features, candidatas) -> Decision`, que devolve a probabilidade de cada candidata, a confiança (a probabilidade da escolhida), a margem sobre a segunda e a contribuição de cada fator. Cada pedido contribui com no máximo uma parada viável (a coleta ou a entrega), então com mochila de 3 pedidos há **2 ou 3 candidatas** (média de 2,31).
-
-A pontuação de cada candidata é um modelo próprio e a probabilidade é um softmax entre as candidatas, treinado para **imitar a escolha do B2**, o planejador que vê o preparo e o trânsito verdadeiros. O Jev só usa o que a plataforma enxerga, com o ETA e o preparo aprendidos do Passo 5. Os 9 fatores: tempo até a parada, se é coleta, espera prevista no restaurante, folga até o prazo, idade do pedido, se já está atrasado, distância às outras paradas, pedidos na mochila depois e quanto falta para o pedido ficar pronto.
-
-Dois modelos: um **linear com softmax**, em que a explicação é exata (a contribuição do fator j é `w_j × (z_j da candidata − média das candidatas)`, e a soma dá a pontuação da candidata menos a média), e uma **rede pequena** (32 e 16 unidades), só para comparar. Treinam nas decisões do B2 em dias simulados: 193.190 decisões (dias 21 a 50), validação com 32.524 (dias 61 a 65), teste com **129.013 decisões dos dias 101 a 120**. Coletar os dados custou 369 s de simulação do B2 (55 dias: 30 de treino, 5 de validação e 20 de teste); treinar leva 1 s o linear e 4 s a rede.
-
-### Quanto o Jev acerta o que o B2 faz
-
-Top-1 nas 129.013 decisões de teste (acertar a mesma parada que o B2 escolheu):
-
-| | Acerto |
-|---|---|
-| Sorteio uniforme entre as candidatas | 44,9% |
-| Sempre a parada mais próxima (a regra do B0) | 31,3% |
-| Sempre a de menor folga até o prazo | 47,2% |
-| Planejador re-otimizando agora, com a mesma visão da plataforma | 93,5% |
-| **Jev linear** | **95,3%** |
-| **Jev rede** | **96,5%** |
-
-Os dois Jev ficam acima do planejador que re-otimiza com as mesmas estimativas. Uma explicação plausível, que não testei: imitar o B2 incorpora um pouco do que o preparo e o trânsito verdadeiros mudam, que estimativas pontuais perdem. O acerto é 95,2% com 2 candidatas e 95,7% com 3 (linear).
-
-**Calibração** (linear): a probabilidade que ele dá à escolhida tem erro de calibração esperado de **0,007** (rede: 0,001) e a probabilidade média que ele dá à escolha do B2 é 0,925 (rede: 0,950). Por faixa de confiança, no linear:
-
-| Confiança | Decisões | Confiança média | Acerto |
-|---|---|---|---|
-| 0,3 a 0,5 | 217 | 0,46 | 0,44 |
-| 0,5 a 0,6 | 3.712 | 0,55 | 0,58 |
-| 0,6 a 0,7 | 3.912 | 0,65 | 0,69 |
-| 0,7 a 0,8 | 5.090 | 0,75 | 0,79 |
-| 0,8 a 0,9 | 8.332 | 0,86 | 0,88 |
-| 0,9 a 1,0 | 107.750 | 0,99 | 0,99 |
-
-Ele é um pouco **subconfiante** nas faixas do meio (acerta mais do que diz). 83,5% das decisões têm confiança acima de 0,9: a maioria é fácil.
-
-Os pesos do linear, por desvio padrão de cada fator (todos negativos: a pontuação sobe quando o fator é menor): espera prevista no restaurante -1,79, falta para o pedido ficar pronto -1,35, pedidos na mochila depois -0,90, é uma coleta -0,78, tempo até a parada -0,55, folga até o prazo -0,41, idade do pedido -0,38, já atrasado -0,34 e distância às outras paradas -0,29. Os fatores andam juntos (folga, atraso e idade, por exemplo), então os pesos individuais não se leem sozinhos: no mapa, leia o conjunto.
-
-### O Jev dirigindo a frota
-
-No painel do mapa, ao clicar num entregador, aparecem as candidatas da decisão que gerou o trecho em curso, a probabilidade de cada uma, as barras de quanto cada fator pesou na escolhida (para cima em verde, para baixo em vermelho) e anéis nas paradas candidatas, com o tamanho dado pela probabilidade.
-
-A política **Jev** atribui como o B1+ (inserção mais barata com os modelos aprendidos) e usa o Jev para escolher a próxima parada. Mesmos 20 dias de teste, 400 entregadores (`delivery-lab sim run --policy jev --days 20 --first-day 101`):
-
-| | B1+ | **Jev linear** | Jev rede | B2 (teto) |
+| Política | Entregas no prazo | Atraso P90 | Tempo médio do pedido | Km por pedido |
 |---|---|---|---|---|
-| Entregues no prazo (%) | 91,2 ± 2,4 | **91,3 ± 2,5** | 91,0 ± 2,5 | 93,8 ± 1,8 |
-| Atraso P90 (min) | 0,4 ± 0,8 | 0,4 ± 0,8 | 0,5 ± 0,9 | 0,0 ± 0,0 |
-| Tempo do pedido, média (min) | 31,2 | 31,3 | 31,3 | 28,0 |
-| Espera no restaurante (min) | 2,1 | 2,1 | 2,1 | 0,5 |
-| Km rodados por pedido | 4,25 | 4,27 | 4,26 | 4,17 |
+| B0 | 78,6% ± 4,1 | 12,5 min | 34,1 min | 4,88 |
+| B1 | 80,6% ± 3,2 | 6,7 min | 32,8 min | 3,89 |
+| **B1+** | **91,2% ± 2,4** | **0,4 min** | **31,2 min** | **4,25** |
+| **Jev linear** | **91,3% ± 2,5** | **0,4 min** | **31,3 min** | **4,27** |
+| B2, privilegiado | 93,8% ± 1,8 | 0,0 min | 28,0 min | 4,17 |
 
-**O Jev linear empata com o B1+** (diferença de 0,05 ponto, dentro do ruído de 2,5): trocar a sequência do plano pela escolha do Jev não custa nada na frota e dá probabilidades e explicação. **A rede acerta mais as escolhas do B2 (96,5% contra 95,3%), mas fica 0,3 ponto atrás na frota**, também dentro do ruído: a complexidade extra não compensa e ainda perde a explicação exata.
+![Entregas no prazo por política nos 20 dias de teste](docs/assets/politicas-no-prazo.svg)
 
-### Velocidade e a decisão sobre Go
+O B1+ ganha **10,6 pontos percentuais** sobre o B1 e percorre mais quilômetros por pedido. Aproxima-se do resultado da referência privilegiada sem acessar preparo ou trânsito verdadeiros. É uma troca entre prazo, distância e espera, medida na simulação.
 
-- No simulador, uma decisão do Jev (montar as features e pontuar) leva em média **50 µs** (P99 75 µs, 258.285 decisões).
-- **Comparação justa nos mesmos estados** (13.165 decisões, planos de 4 paradas em média, no máximo 6): o planejador re-otimizando agora leva 75 µs (P99 320 µs) e o Jev 51 µs (P99 70 µs). Ou seja, **só 1,5 vez mais rápido na média**: com mochila de 3 pedidos o planejador exaustivo já é rápido, e a promessa de "responder em microssegundos" não é o diferencial aqui.
-- A vantagem aparece quando o plano cresce. Planejar do zero, com todas as paradas, em uma bancada com pedidos aleatórios:
+### Aprender preparo valeu mais que aprender trânsito
 
-| Pedidos no plano | 2 | 3 | 4 | 5 | 6 |
-|---|---|---|---|---|---|
-| Planejador exaustivo | 0,8 ms | 1,3 ms | 13,8 ms | 1,2 s | 157 s |
-| Jev (features + modelo) | 0,12 ms | 0,07 ms | 0,13 ms | 0,24 ms | 0,87 ms |
+O planejador com preparo aprendido chegou a **90,2%** no prazo, frente aos **80,6%** do B1. A variante só com ETA chegou a **81,1%**; com os dois modelos, a **91,2%**. Outro regime de trânsito pode mudar essa comparação.
 
-  Isto mede só a **latência**: o Jev foi treinado com no máximo 3 candidatas, e a qualidade dele com mais pedidos não foi avaliada.
-- **Go não foi necessário.** Gerar os dados de 55 dias do B2 levou 369 s; o treino leva segundos.
+As variantes com preparo aprendido usam o quantil 0,6 e margem de saída de 30 s; B1 e a variante só com ETA usam 150 s. Esses ajustes foram escolhidos nos dias 1 a 10. A comparação inclui essa mudança de configuração; não isola o efeito do modelo mantendo a margem fixa.
 
-### Suposições e limites do Passo 6
+![Ablação dos modelos de preparo e ETA no planejador B1](docs/assets/ablacao-preparo-eta.svg)
 
-- **O Jev imita o B2, então não passa dele.** O que ele entrega é a explicação, a calibração e uma decisão que não depende de enumerar sequências; o resultado da frota empata com o B1+, não o supera.
-- O acerto de 95% vem em boa parte de decisões fáceis (83,5% com confiança acima de 0,9). O que importa é o empate na frota, que mede a política de verdade, com o Jev dirigindo os próprios estados.
-- A explicação é do **modelo**, não do mundo: diz o que pesou na pontuação do Jev, não o que causaria atraso. Os fatores são correlacionados.
-- Na frota o Jev só decide a sequência; a atribuição de cada pedido continua pela inserção do B1+, e o plano da inserção segue existindo só para avaliar pedidos novos.
-- Treinado e testado só com mochila de 3 pedidos; só o linear tem a explicação exata.
+### Imitar melhor não garantiu entregar melhor
 
-## Como rodar
+O Jev linear escolhe a mesma parada que B2 em **95,3% de 129.013 decisões de teste** e tem erro de calibração esperado de **0,007**. Isso mede imitação, não a taxa de entregas no prazo. Com o Jev dirigindo a frota, o resultado ficou próximo ao B1+.
 
-Requer [uv](https://docs.astral.sh/uv/) e Node 20.19 ou mais novo.
+Uma rede pequena imitou melhor (**96,5%**), mas ficou em **91,0%** de entregas no prazo. A versão linear foi mantida no mapa por oferecer contribuições exatas dos fatores e resultado operacional semelhante, com menor complexidade.
+
+![Comparação entre acerto de imitação e resultado operacional dos modelos Jev](docs/assets/jev-imitacao-operacao.svg)
+
+## Veja a decisão no mapa
+
+O replay permite trocar entre as cinco políticas, avançar o relógio, acompanhar pedidos, selecionar entregadores e inspecionar rotas. Na política **Jev**, clique em um entregador em deslocamento para ver as paradas candidatas, suas probabilidades e os fatores que pesaram na escolha.
+
+![Painel do Jev com alternativas de próxima parada, probabilidades e contribuição de cada fator](docs/assets/mapa-decisao-jev.jpg)
+
+As barras explicam a pontuação do **modelo** em relação às alternativas; não demonstram causas de atraso no mundo real. O mapa mostra um dia de replay. As tabelas e gráficos resumem 20 dias.
+
+Veja as [condições e os passos para reproduzir as capturas](docs/capturas.md), incluindo o entregador 162 e a decisão com duas alternativas exibida acima.
+
+![Mapa de calor da demanda sintética ao longo das ruas de Itapipoca](docs/assets/mapa-calor.jpg)
+
+## Como a comparação foi controlada
+
+- **Dias separados:** o planejador foi afinado nos dias 1 a 10. Preparo/ETA treinam nos 21 a 60 e validam nos 61 a 70; Jev treina nos 21 a 50 e valida nos 61 a 65. Todos são avaliados nos dias 101 a 120.
+- **Mais de uma régua:** regras simples, planejador clássico, previsões aprendidas e referência com informação privilegiada. Ablações isolam preparo e ETA; o Jev é avaliado offline e conduzindo a frota.
+- **Métricas de operação e de modelo:** prazo, atraso, tempo, distância, erro de previsão e calibração. Pedidos recusados por ausência de entregador de turno são contados separadamente e excluídos das métricas de entrega.
+- **Verificações automatizadas:** conectividade e caminhos, eventos e turnos, capacidade e precedência da mochila, determinismo, métricas calculadas à mão, gradientes, inferência, persistência e proteção contra acesso ao preparo verdadeiro pelos modelos sem privilégio.
+
+A malha usada na medição tem **7.288 cruzamentos e 19.320 arestas dirigidas**. O mundo contém 600 restaurantes cadastrados e gera aproximadamente 5,3 mil pedidos por dia com restaurante disponível. A rede, as perdas, o Adam e o loop de treino foram implementados no projeto; PyTorch fornece tensores e autograd. O forward de inferência é NumPy. Veja [arquitetura, hipóteses e resultados detalhados](docs/metodologia.md).
+
+## Publicação e demo
+
+A [apresentação](https://juan-severiano.github.io/delivery-routing-lab/) e o [mapa interativo](https://juan-severiano.github.io/delivery-routing-lab/mapa/) são publicados no GitHub Pages. O mapa usa um **snapshot congelado do dia 101**, com as cinco políticas: abrir a demo não executa treino nem simulação no navegador.
+
+O pacote em [`demo/`](demo/README.md) contém a cidade, o mundo e os cinco replays em JSON compactado, além do [recorte OSM original](demo/itapipoca-roads.osm.json.gz). O [manifesto](demo/manifest.json) registra os arquivos e seus hashes. A publicação restaura esses dados diretamente em `_site/mapa/data/`, sem alterar `web/public/data/`, buscar um mapa novo ou instalar PyTorch.
+
+Para montar e servir a mesma demo localmente, use Node compatível com o Vite e Python 3, a partir da raiz do repositório:
 
 ```bash
-uv sync --extra dev --extra train   # --extra train só é preciso para treinar (instala o torch, ~580 MB)
-uv run delivery-lab city fetch      # baixa as ruas do Overpass (um pedido, ~7 MB)
-uv run delivery-lab city build      # grafo + JSON do mapa
-uv run delivery-lab world build     # restaurantes, demanda e JSON do mapa (--preset dev para o pequeno)
-uv run delivery-lab paths build     # caminhos mínimos entre todos os cruzamentos (~20 s, ~320 MB, não versionado)
-uv run delivery-lab train prep      # modelo de preparo (7 s) -> models/prep.npz
-uv run delivery-lab train eta       # modelo de ETA (20 s) -> models/eta.npz
-uv run delivery-lab train jev       # o Jev, imitando o B2 (~8 min, a maior parte é simular o B2) -> models/jev-*.npz
-uv run delivery-lab sim run --policy b2 --days 20 --first-day 101   # métricas de 20 dias de teste (b0, b1, b1+, b2)
-uv run delivery-lab sim run --policy b1 --days 1 --first-day 101 --render-day 101 --render 'web/public/data/replay-{policy}.json'   # replay para o mapa (repita com b0, b1+, jev e b2)
-uv run pytest
-npm --prefix web install
-npm --prefix web run dev            # http://localhost:5173
+npm --prefix web ci
+python3 scripts/build_pages.py
+python3 -m http.server --directory _site
 ```
 
-`city fetch` faz um único pedido ao Overpass API e se recusa a baixar de novo se o arquivo existir.
+Abra `http://localhost:8000/` para a apresentação e `http://localhost:8000/mapa/` para o replay. O [script de publicação](scripts/build_pages.py) compila a interface e monta `_site/`; depois da instalação das dependências, esse processo usa apenas arquivos locais, sem Overpass, API paga ou credencial de IA.
 
-## Licenças e créditos
+O workflow de GitHub Pages publica a pasta montada automaticamente a cada push na `main`. O pacote de dados é distribuído sob [ODbL 1.0](demo/LICENSE-data.txt), com atribuição ao OpenStreetMap; o código permanece sob MIT. A fonte OSM usada na demo também fica disponível no site em [`dados/itapipoca-roads.osm.json.gz`](https://juan-severiano.github.io/delivery-routing-lab/dados/itapipoca-roads.osm.json.gz).
 
-- Código: MIT (ver `LICENSE`).
-- Ruas e mapa: © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), licença ODbL. O recorte baixado e o JSON do mapa derivado dele **não são versionados**; os scripts os recriam.
+## Executar o mapa
+
+Os comandos abaixo recriam os dados e os replays pelo simulador. Para apenas abrir o snapshot publicado, use a [demo](#publicação-e-demo).
+
+Requer [uv](https://docs.astral.sh/uv/), Python **3.12+** e Node **20.19+ na série 20, ou 22.12+**. Execute da raiz do repositório. Os pesos de preparo, ETA e Jev estão versionados em `models/`; não é necessário treinar para abrir o replay.
+
+```bash
+uv sync --extra train
+uv run delivery-lab city fetch
+uv run delivery-lab city build
+uv run delivery-lab world build --preset plataforma --seed 7
+uv run delivery-lab paths build
+
+# Gera os cinco replays que a interface carrega.
+for policy in b0 b1 'b1+' jev b2; do
+  uv run delivery-lab sim run --policy "$policy" \
+    --preset plataforma --seed 7 --couriers 400 \
+    --days 1 --first-day 101 --render-day 101 \
+    --render 'web/public/data/replay-{policy}.json'
+done
+
+npm --prefix web ci
+npm --prefix web run dev
+```
+
+Abra o endereço local exibido pelo Vite (normalmente `http://localhost:5173`). O placeholder `{policy}` gera, entre outros, `replay-b1plus.json`, nome esperado pela interface. A preparação baixa as ruas uma vez (cerca de 7 MB) e calcula caminhos entre todos os cruzamentos (cerca de 320 MB em disco). Se o recorte OSM já existir, pule `city fetch`; ele não o substitui sem `--force`.
+
+O extra `train` instala PyTorch: o forward usa NumPy, mas os módulos dos modelos ainda importam PyTorch. Os comandos acima usam os pesos publicados sem reexecutar treino. Não há API paga nem credencial de IA.
+
+O mapa OSM pode mudar entre downloads. Para os pesos publicados, mantenha `plataforma` e semente 7; outra configuração exige novos modelos. Os arquivos de trabalho em `data/raw/`, `data/out/` e `web/public/data/` continuam fora do versionamento; o recorte OSM original e os sete JSONs da demo estão congelados como gzip em `demo/`. A [metodologia](docs/metodologia.md#fonte-do-mapa-e-limites-de-reprodução) explica como usar essa fonte para reconstruir o mesmo grafo.
+
+## Reproduzir resultados e validar
+
+Com o grafo e os caminhos preparados:
+
+```bash
+# Métricas das cinco políticas nos mesmos 20 dias de teste.
+for policy in b0 b1 'b1+' jev b2; do
+  uv run delivery-lab sim run --policy "$policy" \
+    --preset plataforma --seed 7 --couriers 400 --days 20 --first-day 101
+done
+
+# Gráficos, a partir dos resultados salvos.
+uv run --with matplotlib python scripts/plot_results.py
+
+# Testes e compilação da interface.
+uv sync --extra dev --extra train
+uv run pytest
+npm --prefix web run build
+```
+
+Os [resultados por dia](docs/resultados.json) acompanham os gráficos. A [reprodução detalhada](docs/metodologia.md#reprodução) inclui reexecutar a coleta, ablações, treino e bancada de heurística contra enumeração.
+
+## Limites e escopo
+
+O laboratório demonstra avaliação e decisões técnicas **dentro de uma simulação**. Os modelos aprendem o gerador que criamos: não foram validados em uma operação real, outra cidade ou várias sementes de mundo. Preparo tem rótulo limpo, a chuva é conhecida e o trânsito segue regras simples. A divisão entre dias evita usar o teste na escolha, mas não elimina essas simplificações.
+
+O Jev foi treinado e testado com mochila de 3 pedidos; as probabilidades indicam concordância com B2. A medição com mais pedidos avaliou somente latência. As médias próximas de Jev e B1+ não estabelecem superioridade nem equivalência estatística. Oferta e aceite de despacho continuam como experimento futuro; o escopo atual termina na comparação das políticas e na explicação da próxima parada.
+
+## Licenças
+
+Código sob [MIT](LICENSE). O [pacote demo](demo/README.md), incluindo o recorte OSM e os dados derivados, é distribuído sob [ODbL 1.0](demo/LICENSE-data.txt). Ruas: © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright). Os dados operacionais são inteiramente sintéticos.

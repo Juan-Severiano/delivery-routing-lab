@@ -6,6 +6,7 @@ __pycache__/
 .DS_Store
 node_modules/
 web/dist/
+_site/
 
 # OpenStreetMap (ODbL): baixado por script, nao versionado. Credito: © OpenStreetMap contributors.
 data/raw/

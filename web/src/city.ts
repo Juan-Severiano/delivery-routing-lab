@@ -35,7 +35,7 @@ export const CLASS_LABEL: Record<string, string> = {
   residential: "Rua residencial",
 };
 
-export async function loadCity(url = "/data/city.json"): Promise<City> {
+export async function loadCity(url = `${import.meta.env.BASE_URL}data/city.json`): Promise<City> {
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(
