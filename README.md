@@ -83,7 +83,7 @@ A malha usada na medição tem **7.288 cruzamentos e 19.320 arestas dirigidas**.
 
 ## Publicação e demo
 
-A [apresentação](https://juan-severiano.github.io/delivery-routing-lab/), o [guia de funcionamento](https://juan-severiano.github.io/delivery-routing-lab/como-funciona/) e o [mapa interativo](https://juan-severiano.github.io/delivery-routing-lab/mapa/) são publicados no GitHub Pages. O guia mostra as decisões, os fluxos de treino e avaliação e os [quatro modelos gerados](models/README.md). O mapa usa um **snapshot congelado do dia 101**, com as cinco políticas: abrir a demo não executa treino nem simulação no navegador.
+A [apresentação](https://juan-severiano.github.io/delivery-routing-lab/), o [guia de funcionamento](https://juan-severiano.github.io/delivery-routing-lab/como-funciona/) e o [mapa interativo](https://juan-severiano.github.io/delivery-routing-lab/mapa/) são publicados no GitHub Pages. O guia mostra as decisões em quatro fluxogramas interativos, com blocos arrastáveis, zoom e tela cheia, além dos fluxos de treino/avaliação e dos [quatro modelos gerados](models/README.md). O mapa usa um **snapshot congelado do dia 101**, com as cinco políticas: abrir a demo não executa treino nem simulação no navegador.
 
 O pacote em [`demo/`](demo/README.md) contém a cidade, o mundo e os cinco replays em JSON compactado, além do [recorte OSM original](demo/itapipoca-roads.osm.json.gz). O [manifesto](demo/manifest.json) registra os arquivos e seus hashes. A publicação restaura esses dados diretamente em `_site/mapa/data/`, sem alterar `web/public/data/`, buscar um mapa novo ou instalar PyTorch.
 

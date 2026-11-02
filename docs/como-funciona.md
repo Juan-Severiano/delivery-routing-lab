@@ -2,6 +2,8 @@
 
 [Guia publicado](https://juan-severiano.github.io/delivery-routing-lab/como-funciona/) · [Página do projeto](https://juan-severiano.github.io/delivery-routing-lab/) · [Código](../README.md) · [Metodologia detalhada](metodologia.md) · [Resultados por dia](resultados.json)
 
+Na [página interativa](https://juan-severiano.github.io/delivery-routing-lab/como-funciona/), os quatro fluxogramas permitem mover blocos, navegar pelo quadro, aplicar zoom e abrir em tela cheia. As imagens abaixo são as versões estáticas de referência.
+
 O laboratório compara formas de **atribuir pedidos a entregadores**, **escolher a próxima parada** e **decidir quando sair para uma coleta**. As ruas são de Itapipoca, no OpenStreetMap. Restaurantes, pedidos, entregadores, preparo e trânsito são sintéticos.
 
 Há três tarefas aprendidas e quatro arquivos de pesos: previsão de preparo, previsão de viagem e escolha da próxima parada nas versões linear e rede. O trabalho não produz um modelo único que controla sozinho toda a operação.

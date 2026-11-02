@@ -42,14 +42,28 @@ def build(output: Path) -> None:
 
     # No modo pages, Vite não copia web/public: só o pacote público abaixo entra no site.
     subprocess.run(["npm", "--prefix", str(ROOT / "web"), "run", "build", "--", "--mode", "pages"], cwd=ROOT, check=True)
+    subprocess.run(["npm", "--prefix", str(ROOT / "web"), "run", "build:flows"], cwd=ROOT, check=True)
     with tempfile.TemporaryDirectory(prefix="delivery-pages-") as temporary:
         site = Path(temporary) / "site"
         site.mkdir()
         shutil.copy2(ROOT / "docs/delivery-routing-lab.html", site / "index.html")
         guide = site / "como-funciona"
         guide.mkdir()
-        shutil.copy2(ROOT / "docs/como-funciona/index.html", guide / "index.html")
         shutil.copytree(ROOT / "docs/assets", site / "assets")
+        flow_assets = ROOT / "web/dist-flows"
+        shutil.copytree(flow_assets, site / "assets/flow-canvas")
+        asset_tags = []
+        for name, tag in (
+            ("flow-canvas.css", '<link rel="stylesheet" href="{url}">'),
+            ("flow-canvas.js", '<script type="module" src="{url}"></script>'),
+        ):
+            version = hashlib.sha256((flow_assets / name).read_bytes()).hexdigest()[:12]
+            asset_tags.append(tag.format(url=f"../assets/flow-canvas/{name}?v={version}"))
+        guide_html = (ROOT / "docs/como-funciona/index.html").read_text(encoding="utf-8")
+        marker = "<!-- flow-canvas:assets -->"
+        if guide_html.count(marker) != 1:
+            raise ValueError("O guia deve conter um marcador único para os fluxogramas interativos")
+        (guide / "index.html").write_text(guide_html.replace(marker, "\n  ".join(asset_tags)), encoding="utf-8")
         shutil.copy2(ROOT / "docs/resultados.json", site / "resultados.json")
         shutil.copytree(ROOT / "web/dist", site / "mapa")
         data_dir = site / "mapa/data"
