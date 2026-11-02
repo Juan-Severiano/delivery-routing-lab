@@ -13,10 +13,23 @@
   <meta property="og:image" content="https://juan-severiano.github.io/delivery-routing-lab/assets/mapa-visao-geral.jpg">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="theme-color" content="#E9F0F5">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;450;500;600&display=swap" rel="stylesheet">
+  <link rel="preload" href="assets/fonts/barlow-condensed-latin-600.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/ibm-plex-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
   <style>
+    @font-face {
+      font-family: "Barlow Condensed";
+      font-style: normal;
+      font-weight: 600;
+      font-display: swap;
+      src: url("assets/fonts/barlow-condensed-latin-600.woff2") format("woff2");
+    }
+    @font-face {
+      font-family: "IBM Plex Sans";
+      font-style: normal;
+      font-weight: 400 600;
+      font-display: swap;
+      src: url("assets/fonts/ibm-plex-sans-latin.woff2") format("woff2");
+    }
     :root {
       --paper: #F8FBFD;
       --ice: #E9F0F5;
