@@ -1,0 +1,33 @@
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Arial, sans-serif","fontSize":"18px","primaryColor":"#F8FBFD","primaryTextColor":"#193341","primaryBorderColor":"#CBD6DD","lineColor":"#193341","secondaryColor":"#E9F0F5","tertiaryColor":"#E9F0F5","edgeLabelBackground":"#F8FBFD"},"flowchart":{"htmlLabels":false,"curve":"linear","nodeSpacing":30,"rankSpacing":38,"wrappingWidth":280},"deterministicIds":true,"deterministicIDSeed":"delivery-ciclo","fontFamily":"Arial, sans-serif","htmlLabels":false,"look":"classic","markdownAutoWrap":false,"themeCSS":".node .label-container { filter: none !important; }"}}%%
+flowchart TB
+  accTitle: O ciclo de um pedido no simulador
+  accDescr: Um pedido criado sem entregadores de turno é recusado. Com turno, entra na fila. Se assign não encontra capacidade, aguarda FREE, SHIFT_START ou um novo pedido e tenta novamente. A política atribui o pedido. Se o entregador está ocupado, conclui o trecho ou atendimento até FREE; se está livre, next_stop escolhe parada e saída. Pode agendar WAKE para reavaliar. O caminho é determinístico; o simulador aplica os tempos reais, executa coleta ou entrega, atualiza a mochila e agenda FREE.
+  N["Pedido criado"] --> T{"Há entregador<br/>de turno?"}
+  T -- "não" --> R["Recusa registrada<br/>Fora das métricas de entrega"]
+  T -- "sim" --> Q["Fila de pedidos pendentes"]
+  Q --> A{"assign encontra<br/>capacidade?"}
+  A -- "não" --> F["Aguardar FREE, SHIFT_START<br/>ou chegada de novo pedido"]
+  F --> Q
+  A -- "sim" --> B["Atribui ao entregador<br/>e inclui na mochila"]
+  B --> BUSY{"Está ocupado?"}
+  BUSY -- "sim" --> WAIT["Conclui trecho ou atendimento<br/>até o evento FREE"]
+  WAIT --> FR
+  BUSY -- "não" --> C["next_stop escolhe<br/>parada e hora de saída"]
+  C -- "sem parada viável" --> IDLE["Fica livre<br/>até um novo pedido"]
+  C -- "com parada" --> D{"Sair agora?"}
+  D -- "não" --> WA["Agenda WAKE<br/>Reavalia o plano ao despertar"]
+  WA --> C
+  D -- "sim" --> P["Segue caminho mínimo<br/>com tempo real simulado"]
+  P --> H{"Chegou para<br/>coletar ou entregar?"}
+  H -- "coletar" --> CO["Espera ficar pronto<br/>e faz a retirada"]
+  H -- "entregar" --> EN["Registra entrega<br/>e libera capacidade"]
+  CO --> FR["Evento FREE<br/>Tenta próxima parada<br/>e pedidos pendentes"]
+  EN --> FR
+  FR --> C
+  FR --> Q
+  classDef decision fill:#E9F0F5,color:#193341,stroke:#193341
+  classDef rejected fill:#F8FBFD,color:#B44C24,stroke:#B44C24
+  classDef policy fill:#2452D6,color:#F8FBFD,stroke:#2452D6
+  class T,A,BUSY,D,H decision
+  class R rejected
+  class C policy

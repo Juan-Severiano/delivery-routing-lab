@@ -10,7 +10,7 @@ Em 20 dias simulados, prever preparo e tempo de viagem elevou as entregas no pra
 
 ![Mapa do dia simulado, com ruas de Itapipoca, entregadores e pedidos em andamento](docs/assets/mapa-visao-geral.jpg)
 
-[Apresentação visual](docs/delivery-routing-lab.html) · [Metodologia completa](docs/metodologia.md) · [Resultados por dia](docs/resultados.json) · [Executar o mapa](#executar-o-mapa)
+[Apresentação visual](docs/delivery-routing-lab.html) · [Como funciona: etapas, fluxogramas e treino](https://juan-severiano.github.io/delivery-routing-lab/como-funciona/) · [Metodologia completa](docs/metodologia.md) · [Resultados por dia](docs/resultados.json) · [Executar o mapa](#executar-o-mapa)
 
 ## O experimento
 
@@ -83,7 +83,7 @@ A malha usada na medição tem **7.288 cruzamentos e 19.320 arestas dirigidas**.
 
 ## Publicação e demo
 
-A [apresentação](https://juan-severiano.github.io/delivery-routing-lab/) e o [mapa interativo](https://juan-severiano.github.io/delivery-routing-lab/mapa/) são publicados no GitHub Pages. O mapa usa um **snapshot congelado do dia 101**, com as cinco políticas: abrir a demo não executa treino nem simulação no navegador.
+A [apresentação](https://juan-severiano.github.io/delivery-routing-lab/), o [guia de funcionamento](https://juan-severiano.github.io/delivery-routing-lab/como-funciona/) e o [mapa interativo](https://juan-severiano.github.io/delivery-routing-lab/mapa/) são publicados no GitHub Pages. O guia mostra as decisões, os fluxos de treino e avaliação e os [quatro modelos gerados](models/README.md). O mapa usa um **snapshot congelado do dia 101**, com as cinco políticas: abrir a demo não executa treino nem simulação no navegador.
 
 O pacote em [`demo/`](demo/README.md) contém a cidade, o mundo e os cinco replays em JSON compactado, além do [recorte OSM original](demo/itapipoca-roads.osm.json.gz). O [manifesto](demo/manifest.json) registra os arquivos e seus hashes. A publicação restaura esses dados diretamente em `_site/mapa/data/`, sem alterar `web/public/data/`, buscar um mapa novo ou instalar PyTorch.
 

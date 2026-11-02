@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Como funciona o laboratório | delivery-routing-lab</title>
+  <meta name="description" content="Dos dados do OpenStreetMap aos quatro modelos treinados: fluxogramas, decisões do simulador, treinamento, avaliação e preparação para Hugging Face.">
+  <link rel="canonical" href="https://juan-severiano.github.io/delivery-routing-lab/como-funciona/">
+  <meta property="og:title" content="Como funciona o delivery-routing-lab">
+  <meta property="og:description" content="O caminho completo dos dados, das decisões e dos resultados do laboratório de entregas em Itapipoca.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://juan-severiano.github.io/delivery-routing-lab/como-funciona/">
+  <meta property="og:image" content="https://juan-severiano.github.io/delivery-routing-lab/assets/mapa-visao-geral.jpg">
+  <meta name="theme-color" content="#E9F0F5">
+  <link rel="preload" href="../assets/fonts/barlow-condensed-latin-600.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="../assets/fonts/ibm-plex-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <style>
+    @font-face { font-family:"Barlow Condensed";font-style:normal;font-weight:600;font-display:swap;src:url("../assets/fonts/barlow-condensed-latin-600.woff2") format("woff2"); }
+    @font-face { font-family:"IBM Plex Sans";font-style:normal;font-weight:400 600;font-display:swap;src:url("../assets/fonts/ibm-plex-sans-latin.woff2") format("woff2"); }
+    :root { --paper:#F8FBFD;--ice:#E9F0F5;--ink:#193341;--route:#2452D6;--alternative:#B44C24;--road:#CBD6DD;--muted:rgba(25,51,65,.73);--body:"IBM Plex Sans",Arial,sans-serif;--display:"Barlow Condensed","Arial Narrow",sans-serif; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth;scroll-padding-top:28px; }
+    body { margin:0;background:var(--paper);color:var(--ink);font:16px/1.7 var(--body);-webkit-font-smoothing:antialiased; }
+    a { color:var(--route);text-underline-offset:.22em; }
+    a:hover { color:var(--ink); }
+    a:focus-visible,summary:focus-visible,.flow-scroll:focus-visible { outline:3px solid var(--route);outline-offset:5px; }
+    h1,h2,h3,p,figure,dl,dd { margin:0; }
+    h1,h2,h3 { font-family:var(--display);font-weight:600;line-height:1.08; }
+    h1 { font-size:clamp(48px,5.3vw,76px);letter-spacing:-.02em;max-width:17ch; }
+    h2 { font-size:clamp(32px,3.6vw,44px);letter-spacing:-.01em; }
+    h3 { font-size:27px; }
+    p+p { margin-top:15px; }
+    strong { font-weight:600; }
+    img { display:block;max-width:100%;height:auto; }
+    code { font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.84em;overflow-wrap:anywhere; }
+    p code,li code,td code { padding:2px 4px;background:var(--ice);border-radius:3px; }
+    pre { overflow-x:auto;margin:22px 0 0;padding:22px 24px;background:var(--ink);color:var(--paper);border-radius:5px;font:13px/1.8 ui-monospace,SFMono-Regular,Consolas,monospace; }
+    pre code { font:inherit; }
+    .wrap { width:min(1224px,calc(100% - 96px));margin-inline:auto; }
+    .skip { position:absolute;top:-80px;left:24px;z-index:5;background:var(--paper);padding:12px 18px; }
+    .skip:focus { top:12px; }
+    .site-header { min-height:88px;display:flex;align-items:center;border-bottom:1px solid var(--road); }
+    .header-inner { display:flex;justify-content:space-between;align-items:center;gap:25px; }
+    .wordmark { display:inline-flex;align-items:center;gap:12px;text-decoration:none;color:var(--ink);font-size:17px;font-weight:600;letter-spacing:-.045em; }
+    .wordmark svg { width:29px;height:29px;flex:none; }
+    .header-nav { display:flex;align-items:center;gap:27px;font-size:14px; }
+    .header-nav a { color:var(--ink);text-decoration:none; }
+    .header-nav a[aria-current] { color:var(--route);font-weight:500; }
+    .intro { padding:58px 0 41px; }
+    .intro-top { color:var(--muted);font-size:14px;margin-bottom:18px; }
+    .intro-lead { max-width:64ch;color:var(--muted);font-size:18px;line-height:1.7;margin-top:22px; }
+    .intro-note { max-width:80ch;margin-top:21px;font-size:13px;color:var(--muted); }
+    .doc-layout { display:grid;grid-template-columns:185px minmax(0,1fr);gap:58px;align-items:start; }
+    .doc-nav { min-width:0;position:sticky;top:25px;padding-top:8px;font-size:13px;line-height:1.5; }
+    .doc-nav p { font-weight:500;margin-bottom:13px; }
+    .doc-nav ol { list-style:none;padding:0;margin:0;border-left:1px solid var(--road); }
+    .doc-nav a { display:block;padding:9px 0 9px 15px;text-decoration:none;color:var(--muted); }
+    .doc-nav a:hover { color:var(--route); }
+    .doc-content { min-width:0; }
+    .chapter { padding:32px 0 49px;border-bottom:1px solid var(--road); }
+    .chapter:first-child { padding-top:0; }
+    .chapter h2 { margin-bottom:21px; }
+    .chapter>p,.prose { max-width:76ch; }
+    .chapter h3 { margin-top:29px;margin-bottom:12px; }
+    .sources { font-size:12px;color:var(--muted);margin-top:18px!important; }
+    .sources a { color:inherit; }
+    .flow { margin:27px 0 24px; }
+    .flow-scroll { overflow-x:auto;background:var(--ice);border-radius:5px;border:1px solid var(--road);padding:18px; }
+    .flow img { width:100%;max-width:none;min-width:var(--flow-width,720px); }
+    .flow figcaption { display:flex;justify-content:space-between;align-items:baseline;gap:13px 25px;flex-wrap:wrap;margin-top:11px;font-size:12px;color:var(--muted); }
+    .flow figcaption a { white-space:nowrap; }
+    .flow-hint { font-size:12px;color:var(--muted);margin-top:12px!important; }
+    .table-scroll { overflow-x:auto;margin-top:22px; }
+    table { width:100%;border-collapse:collapse;text-align:left;font-size:14px;line-height:1.6; }
+    caption { text-align:left;font-weight:500;padding-bottom:12px; }
+    th,td { padding:14px 15px;border-bottom:1px solid var(--road);vertical-align:top; }
+    th { background:var(--ice);font-weight:500;font-size:13px; }
+    td:first-child { font-weight:500; }
+    .steps { padding-left:22px;margin:22px 0 0; }
+    .steps li { padding-left:5px; }
+    .steps li+li { margin-top:15px; }
+    .note { margin:24px 0;padding:14px 0 14px 18px;border-left:3px solid var(--route);font-size:14px;color:var(--muted); }
+    .note p { max-width:72ch; }
+    .note strong { color:var(--ink); }
+    .model { padding:4px 0 21px; }
+    .model+.model { border-top:1px solid var(--road);padding-top:6px; }
+    .model-summary { display:grid;grid-template-columns:1fr 1fr;gap:14px 25px;margin:20px 0;font-size:14px; }
+    .model-summary dt { color:var(--muted);font-size:12px;margin-bottom:5px; }
+    .model details { font-size:14px; }
+    .model summary { cursor:pointer;color:var(--route);padding-block:8px; }
+    .model details ul { margin:10px 0;padding-left:20px; }
+    .model details li+li { margin-top:7px; }
+    .model-result { background:var(--ice);padding:13px 17px;border-radius:4px;font-size:14px;margin-top:18px!important; }
+    .split { display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-top:22px; }
+    .split h3 { margin-top:0; }
+    .split p { font-size:14px; }
+    .artifact { white-space:nowrap; }
+    .status-note { display:inline-block;margin-top:16px;color:var(--muted);font-size:13px; }
+    .history { list-style:none;padding:0;margin:23px 0 0; }
+    .history li { display:grid;grid-template-columns:74px 1fr;gap:15px;padding:16px 0;border-bottom:1px solid var(--road);font-size:14px; }
+    .history li:last-child { border-bottom:0; }
+    .history .step-name { color:var(--route);font-weight:500; }
+    .history strong { display:block; }
+    .history .future { color:var(--muted); }
+    .history .future .step-name { color:var(--muted); }
+    .closing { padding:32px 0 62px;display:flex;gap:15px 30px;flex-wrap:wrap;font-size:14px; }
+    .site-footer { padding:25px 0 35px;border-top:1px solid var(--road);font-size:12px;color:var(--muted); }
+    .footer-inner { display:flex;justify-content:space-between;flex-wrap:wrap;gap:15px 25px; }
+    .footer-inner p { margin:0; }
+    .footer-inner a { color:inherit; }
+    @media(max-width:1050px) { .wrap{width:calc(100% - 56px)}.doc-layout{grid-template-columns:155px minmax(0,1fr);gap:35px}.doc-nav{font-size:12px}.flow-scroll{padding:12px} }
+    @media(max-width:760px) {
+      .wrap{width:calc(100% - 40px)}.site-header{min-height:78px}.header-inner{gap:17px}.wordmark{gap:9px;font-size:15px}.wordmark svg{width:24px;height:24px}.header-nav{gap:15px;font-size:12px}.header-nav .overview-link{display:none}
+      .intro{padding:37px 0 30px}.intro-lead{font-size:16px}.intro-note{font-size:12px}.doc-layout{grid-template-columns:minmax(0,1fr);gap:24px}.doc-nav{position:static;padding:0;font-size:13px}.doc-nav p{display:none}.doc-nav ol{display:flex;overflow-x:auto;gap:7px;border:0;border-block:1px solid var(--road);padding:9px 0}.doc-nav li{flex:none}.doc-nav a{padding:7px 12px 7px 0;white-space:nowrap}
+      .chapter{padding:28px 0 36px}.chapter h2{margin-bottom:18px}.chapter{font-size:15px}.chapter h3{font-size:26px}.flow{margin-top:22px}.flow-scroll{padding:12px}.flow figcaption{gap:8px 18px}.model-summary,.split{grid-template-columns:1fr}.model-summary{gap:12px}th,td{padding:12px 10px;font-size:13px}.table-scroll table{min-width:500px}.model-result{font-size:13px}.history li{grid-template-columns:62px 1fr;gap:10px}.closing{padding-bottom:42px}
+    }
+    @media(prefers-reduced-motion:reduce) { html{scroll-behavior:auto} }
+    @media print {
+      @page{size:A4;margin:15mm}body{font-size:10pt;background:white;-webkit-print-color-adjust:exact;print-color-adjust:exact}.wrap{width:100%}.site-header{min-height:40px}.header-nav,.doc-nav,.skip,.closing{display:none}.intro{padding-top:20px}h1{font-size:36pt}h2{font-size:25pt}h3{font-size:18pt}.intro-lead{font-size:12pt}.doc-layout{display:block}.chapter{padding-bottom:25px;break-before:auto}.flow-scroll{overflow:visible;padding:6px}.flow img{min-width:0;max-height:180mm;object-fit:contain}.flow,table,.model-summary{break-inside:avoid}.flow figcaption,.sources{font-size:8pt}.table-scroll{overflow:visible}.table-scroll table{min-width:0}th,td{font-size:9pt;padding:8px}.model-result{font-size:9pt}pre{white-space:pre-wrap;font-size:8pt}.site-footer{font-size:8pt}.flow-hint{display:none}
+    }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#conteudo">Ir para o conteúdo</a>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="wordmark" href="../" aria-label="delivery routing lab, início"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M6 25V15a8 8 0 0 1 8-8h11" stroke="currentColor" stroke-width="2.5"/><circle cx="6" cy="25" r="3" fill="#2452D6"/><circle cx="25" cy="7" r="3" fill="#B44C24"/></svg><span>delivery routing lab</span></a>
+      <nav class="header-nav" aria-label="Navegação principal"><a class="overview-link" href="../">Visão geral</a><a href="./" aria-current="page">Como funciona</a><a href="../mapa/">Mapa</a></nav>
+    </div>
+  </header>
+
+  <main id="conteudo" class="wrap">
+    <header class="intro">
+      <p class="intro-top">O experimento, por dentro</p>
+      <h1>Das ruas aos quatro modelos.</h1>
+      <p class="intro-lead">Como montamos o cenário, decidimos a próxima parada, treinamos os modelos e medimos o resultado. Os fluxos de execução, treino e visualização ficam separados para mostrar quem faz o quê.</p>
+      <p class="intro-note">A cidade vem do OpenStreetMap. Pedidos, restaurantes, entregadores, preparo e trânsito são sintéticos. Os resultados desta página descrevem esse ambiente de teste.</p>
+    </header>
+
+    <div class="doc-layout">
+      <nav class="doc-nav" aria-label="Nesta página"><p>Nesta página</p><ol><li><a href="#cenario">Cenário e visão geral</a></li><li><a href="#pedido">O caminho de um pedido</a></li><li><a href="#politicas">Quem decide o quê</a></li><li><a href="#treino">Como treinamos</a></li><li><a href="#avaliacao">Como medimos</a></li><li><a href="#modelos">Os modelos gerados</a></li><li><a href="#hugging-face">Hugging Face</a></li><li><a href="#site">O que o site executa</a></li><li><a href="#construcao">Ordem da construção</a></li></ol></nav>
+
+      <div class="doc-content">
+        <section id="cenario" class="chapter" aria-labelledby="scenario-title">
+          <h2 id="scenario-title">Primeiro, um cenário que dá para repetir.</h2>
+          <p>O recorte das ruas vira um grafo dirigido: cruzamentos são nós, trechos são arestas e o sentido da via é respeitado. Mantemos a maior componente fortemente conectada, para haver caminho entre os pontos usados. O grafo do experimento tem <strong>7.288 cruzamentos e 19.320 arestas dirigidas</strong>.</p>
+          <p>Os caminhos de menor tempo livre são calculados uma vez com Dijkstra. A velocidade ausente no OSM recebe uma estimativa por classe de via. Depois, uma semente gera restaurantes, perfis de preparo, pedidos e turnos sobre esse mapa.</p>
+          <figure class="flow"><div class="flow-scroll" tabindex="0" role="region" aria-label="Fluxograma de visão geral"><img src="../assets/fluxos/visao-geral.svg" width="940" height="525" alt="Visão geral: ruas OSM formam o grafo e os caminhos; o mundo sintético alimenta o simulador; as políticas recebem os modelos treinados; métricas e replay alimentam a avaliação e o site."></div><figcaption><span>As entradas, a simulação e as saídas do laboratório.</span><a href="../assets/fluxos/visao-geral.svg">Ampliar fluxograma</a><a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/docs/fluxos/visao-geral.mmd">Fonte Mermaid</a></figcaption></figure>
+          <p class="flow-hint">Os fluxogramas podem ser rolados lateralmente ou abertos em tamanho completo.</p>
+          <div class="table-scroll"><table><caption>Configuração usada na comparação principal</caption><thead><tr><th scope="col">Parte</th><th scope="col">Configuração</th></tr></thead><tbody><tr><td>Mundo</td><td>Semente 7; 600 restaurantes cadastrados; cerca de 5,3 mil pedidos disponíveis por dia.</td></tr><tr><td>Frota</td><td>400 entregadores com turnos; mochila para até três pedidos.</td></tr><tr><td>Tempos</td><td>Preparo e trânsito escondidos, chuva e ruído por viagem.</td></tr><tr><td>Verdade do simulador</td><td>Usada para gerar observações e avaliar. Só B2 a acessa como política privilegiada.</td></tr></tbody></table></div>
+          <p class="sources">No código: <a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/src/delivery_lab/city.py">city.py</a>, <a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/src/delivery_lab/paths.py">paths.py</a>, <a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/src/delivery_lab/world.py">world.py</a> e <a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/src/delivery_lab/traffic.py">traffic.py</a>.</p>
+        </section>
+
+        <section id="pedido" class="chapter" aria-labelledby="order-title">
+          <h2 id="order-title">O que acontece quando um pedido nasce.</h2>
+          <p>O simulador avança de evento em evento. Pedido criado, início de turno, saída agendada, chegada e entregador livre são momentos em que o estado muda ou uma decisão precisa ser tomada.</p>
+          <figure class="flow"><div class="flow-scroll" tabindex="0" role="region" aria-label="Fluxograma de ciclo do pedido"><img src="../assets/fluxos/ciclo-pedido.svg" width="1037" height="2416" alt="Ciclo do pedido: sem entregador de turno ele é recusado; com turno entra na fila, aguarda capacidade, é atribuído e segue por escolha de parada, eventual espera, viagem, coleta ou entrega; ao ficar livre o entregador aciona novas decisões."></div><figcaption><span>Recusa por falta de turno e espera por capacidade são ramos diferentes.</span><a href="../assets/fluxos/ciclo-pedido.svg">Ampliar fluxograma</a><a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/docs/fluxos/ciclo-pedido.mmd">Fonte Mermaid</a></figcaption></figure>
+          <ol class="steps"><li><strong>Nasceu o pedido.</strong> Sem nenhum entregador de turno, ele é recusado e contado sem entrega. Havendo turno, entra na fila de pendentes.</li><li><strong>Tentar atribuir.</strong> A política considera os entregadores de turno com espaço. Sem capacidade, o pedido continua na fila; eventos de disponibilidade provocam uma nova tentativa.</li><li><strong>Entrar no plano.</strong> O pedido passa a ocupar capacidade. Um entregador ocupado termina o trecho atual; um livre pode receber a próxima parada.</li><li><strong>Sair agora ou esperar.</strong> O planejador pode agendar uma saída futura com <code>WAKE</code>. Na hora marcada, decide de novo; pedidos novos e mudanças no plano podem alterar a espera.</li><li><strong>Percorrer e atender.</strong> Na coleta, pode haver espera pelo preparo e mais 60 s de retirada. No cliente, a entrega é registrada após 45 s; o entregador fica ocupado por 60 s após a chegada.</li><li><strong>Ficar livre.</strong> O evento <code>FREE</code> permite escolher a próxima parada e tentar pedidos pendentes. O início de um turno também libera novas atribuições.</li></ol>
+          <aside class="note"><p><strong>Atribuição é automática nesta simulação.</strong> O laboratório ainda não modela a oferta de uma corrida, o aceite ou a recusa do entregador. Isso é o Passo 7, que permanece como experimento futuro.</p></aside>
+          <p class="sources">No código: <a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/src/delivery_lab/sim.py#L240">eventos e pedidos pendentes em sim.py</a>.</p>
+        </section>
+
+        <section id="politicas" class="chapter" aria-labelledby="policies-title">
+          <h2 id="policies-title">Três decisões que não são a mesma coisa.</h2>
+          <div class="table-scroll"><table><thead><tr><th scope="col">Decisão</th><th scope="col">Pergunta</th><th scope="col">Responsável</th></tr></thead><tbody><tr><td>Atribuição</td><td>Quem recebe o pedido?</td><td><code>assign</code> da política.</td></tr><tr><td>Próxima parada</td><td>Qual coleta ou entrega vem agora?</td><td><code>next_stop</code>. No Jev, o modelo pontua as candidatas viáveis.</td></tr><tr><td>Caminho</td><td>Por quais ruas chegar à parada?</td><td>Os caminhos mínimos já calculados no grafo.</td></tr></tbody></table></div>
+          <p style="margin-top:22px">O <strong>Jev escolhe a próxima parada</strong>. A atribuição continua com o planejador B1+, e o trajeto pelas ruas vem dos caminhos mínimos. O trânsito muda a duração da viagem nesse caminho; não faz o modelo desenhar uma nova rota.</p>
+          <div class="table-scroll"><table><thead><tr><th scope="col">Política</th><th scope="col">Como decide</th><th scope="col">Informação disponível</th></tr></thead><tbody><tr><td>B0</td><td>Entregador livre mais próximo, ou com espaço; depois a parada mais próxima.</td><td>Distância em linha reta; sem previsão de preparo ou trânsito.</td></tr><tr><td>B1</td><td>Inserção de coleta/entrega nos planos de até 40 entregadores elegíveis próximos, seguida de 2-opt.</td><td>Preparo fixo de 700 s e tempo livre das vias.</td></tr><tr><td>B1+</td><td>O mesmo planejador com preparo e ETA aprendidos.</td><td>Restaurante, hora, chuva prevista e posições.</td></tr><tr><td>Jev</td><td>Atribui como B1+; escolhe a próxima parada com um modelo treinado.</td><td>As estimativas disponíveis à plataforma.</td></tr><tr><td>B2</td><td>Mesma heurística de inserção e 2-opt, com informação privilegiada.</td><td>Preparo verdadeiro e trânsito corrente; sem conhecer o ruído da viagem.</td></tr></tbody></table></div>
+          <h3>O custo e a hora de sair</h3>
+          <p>O planejador minimiza o aumento do tempo dos pedidos até a entrega, com uma penalidade adicional de três vezes o atraso. Para uma coleta, a saída pode ser adiada:</p>
+          <pre><code>saída = máximo(agora, pronto_estimado − viagem_estimada − margem)</code></pre>
+          <p style="margin-top:18px">B1 usa margem de 150 s. As variantes com preparo aprendido usam 30 s e o quantil 0,6 do preparo; B2 também usa 30 s. Esses parâmetros foram escolhidos nos dias 1 a 10, separados do teste.</p>
+          <p class="sources">No código: <a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/src/delivery_lab/planner.py">planner.py</a> e <a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/src/delivery_lab/learn/jev.py#L339">JevPlanner</a>. B2 continua sendo uma heurística, não o ótimo global.</p>
+        </section>
+
+        <section id="treino" class="chapter" aria-labelledby="training-title">
+          <h2 id="training-title">Treinar três tarefas, salvar quatro modelos.</h2>
+          <p>Os pesos começam aleatórios. O projeto implementa a rede, a inicialização Xavier, as perdas, o Adam e o laço de treino. PyTorch calcula os gradientes; a inferência dos pesos salvos usa NumPy.</p>
+          <p>O treino passa por minilotes, reduz a taxa de aprendizado com uma curva de cosseno e acompanha a perda de validação. Ao terminar, restaura a melhor época da validação. O conjunto de teste fica fora dessa escolha.</p>
+          <figure class="flow"><div class="flow-scroll" tabindex="0" role="region" aria-label="Fluxograma de treinamento"><img src="../assets/fluxos/treinamento.svg" width="978" height="943" alt="Treino em três tarefas: pedidos e preparo observado treinam a previsão de preparo; trechos percorridos pelo B0 treinam ETA; B2 gera escolhas rotuladas usando features estimadas para treinar Jev linear e rede. Os pesos de preparo e ETA são necessários antes de coletar as features do Jev."></div><figcaption><span>O B2 é professor só na tarefa de imitar a próxima parada.</span><a href="../assets/fluxos/treinamento.svg">Ampliar fluxograma</a><a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/docs/fluxos/treinamento.mmd">Fonte Mermaid</a></figcaption></figure>
+
+          <article class="model" aria-labelledby="prep-title"><h3 id="prep-title">Preparo: quando o pedido estará pronto?</h3><p>O gerador produz o tempo observado de preparo. Restaurante, tipo, horário e chuva são as entradas; o perfil escondido do restaurante não é entregue ao modelo.</p><dl class="model-summary"><div><dt>Entrada e rede</dt><dd>14 features + embedding de restaurante com dimensão 8; rede 22 → 48 → 48 → 2.</dd></div><div><dt>Alvo e perda</dt><dd>Log do preparo em segundos. NLL gaussiana; a rede prevê média e dispersão.</dd></div><div><dt>Dados</dt><dd>212.389 pedidos de treino; 52.882 de validação; 106.401 de teste.</dd></div><div><dt>Artefato</dt><dd><code>models/prep.npz</code>; melhor época registrada: 26.</dd></div></dl><details><summary>Entradas, distribuição e uso no planejador</summary><ul><li>A hora é codificada em seis valores de seno/cosseno; o tipo do restaurante usa sete indicadores; chuva acrescenta um valor.</li><li>O embedding guarda oito números para cada um dos 600 índices de restaurante deste mundo.</li><li>Uma gaussiana no log pressupõe uma família lognormal, também usada no simulador. Isso favorece o ajuste ao gerador e limita a generalização.</li><li>A distribuição permite obter quantis. B1+ usa o quantil 0,6 para estimar quando o pedido ficará pronto.</li></ul></details><p class="model-result"><strong>Teste:</strong> MAE da mediana (quantil 0,5) de 4,77 min, contra 11,60 min da regra fixa e 5,44 min da tabela por tipo/hora. A mediana verdadeira do simulador tem MAE de 4,74 min.</p><p class="sources"><a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/src/delivery_lab/learn/prep.py">Código do preparo</a> · <a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/models/prep.json">Métricas salvas</a></p></article>
+
+          <article class="model" aria-labelledby="eta-title"><h3 id="eta-title">ETA: quanto a viagem demora?</h3><p>O B0 percorre dias simulados. O coletor guarda origem, destino e duração dos trechos efetivamente percorridos, incluindo o ruído da viagem.</p><dl class="model-summary"><div><dt>Entrada e rede</dt><dd>14 features; rede 14 → 64 → 64 → 1.</dd></div><div><dt>Alvo e perda</dt><dd>Log da razão duração observada / tempo livre; erro quadrático médio (MSE).</dd></div><div><dt>Dados</dt><dd>390.904 trechos de treino; 97.147 de validação; 195.369 de teste.</dd></div><div><dt>Artefato</dt><dd><code>models/eta.npz</code>; melhor época registrada: 4.</dd></div></dl><details><summary>As features e o que a saída significa</summary><ul><li>Hora, chuva, posições normalizadas da origem e do destino, log do tempo livre, log da distância em linha reta e relação distância/tempo.</li><li>A rede prevê um multiplicador. O tempo estimado é tempo livre × razão prevista.</li><li>O tempo livre vem do grafo; a rede estima quanto o trecho observado se afasta dessa referência.</li></ul></details><p class="model-result"><strong>Teste:</strong> MAE de 23,38 s, contra 44,06 s do tempo livre e 31,85 s da tabela por hora.</p><p class="sources"><a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/src/delivery_lab/learn/eta.py">Código do ETA</a> · <a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/models/eta.json">Métricas salvas</a></p></article>
+
+          <article class="model" aria-labelledby="jev-title"><h3 id="jev-title">Jev: qual parada escolher agora?</h3><p>Com preparo e ETA já treinados, B2 dirige a simulação como professor. Em cada saída com duas ou mais opções, o coletor registra as candidatas, as features que B1+ conseguiria calcular e o índice da escolha do B2.</p><p>O rótulo é essa escolha. Trata-se de <strong>aprendizado supervisionado por imitação</strong>. O modelo recebe a visão estimada da plataforma, mesmo quando o professor tomou sua decisão com informação privilegiada.</p><dl class="model-summary"><div><dt>As duas versões</dt><dd>Linear: 9 → 1. Rede: 9 → 32 → 16 → 1.</dd></div><div><dt>Saída e perda</dt><dd>Pontuação por candidata; softmax entre alternativas. Entropia cruzada da escolha do professor.</dd></div><div><dt>Dados</dt><dd>193.190 decisões de treino; 32.524 de validação; 129.013 de teste.</dd></div><div><dt>Artefatos</dt><dd><code>jev-linear.npz</code> e <code>jev-mlp.npz</code>; melhores épocas: 29 e 21.</dd></div></dl><details><summary>As nove features e a explicação da escolha</summary><ul><li>Tempo até a parada, se é coleta, espera prevista, folga até o prazo, idade do pedido, atraso previsto, distância temporal às outras paradas, mochila após a ação e quanto falta para o preparo estimado.</li><li>As features são normalizadas com média e desvio do treino. A mesma função pontua todas as candidatas da decisão.</li><li>Com uma só candidata, o modelo é dispensado. Neste conjunto, as escolhas avaliadas têm duas ou três candidatas; o buffer de seis posições do código serve para padding.</li><li>No linear, a contribuição é peso × diferença da feature normalizada para a média das alternativas. Isso explica a pontuação do modelo.</li><li>ECE mede a calibração das probabilidades no teste. Não há uma etapa adicional de ajuste por temperatura no treino atual.</li></ul></details><p class="model-result"><strong>Teste offline:</strong> o linear imita 95,34% das escolhas do B2 e a rede, 96,51%. Esse percentual não é a taxa de entregas no prazo.</p><p class="sources"><a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/src/delivery_lab/learn/jev.py">Código do Jev</a> · <a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/models/jev.json">Métricas e calibração</a></p></article>
+
+          <h3>Os dias de cada etapa</h3>
+          <div class="table-scroll"><table><thead><tr><th scope="col">Uso</th><th scope="col">Dias simulados</th></tr></thead><tbody><tr><td>Ajustar o planejador</td><td>1 a 10</td></tr><tr><td>Treinar preparo e ETA</td><td>21 a 60</td></tr><tr><td>Validar preparo e ETA</td><td>61 a 70</td></tr><tr><td>Treinar Jev</td><td>21 a 50</td></tr><tr><td>Validar Jev</td><td>61 a 65</td></tr><tr><td>Testar modelos e políticas</td><td>101 a 120</td></tr></tbody></table></div>
+          <p class="sources">Ordem e intervalos: <a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/src/delivery_lab/cli.py#L143">CLI de treino</a>. Minilotes, validação e melhor época: <a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/src/delivery_lab/learn/fit.py">fit.py</a>. Essa separação testa novos dias do mesmo mundo sintético.</p>
+        </section>
+
+        <section id="avaliacao" class="chapter" aria-labelledby="evaluation-title">
+          <h2 id="evaluation-title">Medir a previsão e depois medir a frota.</h2>
+          <p>Uma boa métrica do modelo não garante uma política melhor. Por isso, fazemos duas avaliações: os exemplos de teste medem previsão/imitação; o simulador deixa cada política dirigir os estados que ela mesma produz.</p>
+          <figure class="flow"><div class="flow-scroll" tabindex="0" role="region" aria-label="Fluxograma de avaliação"><img src="../assets/fluxos/avaliacao.svg" width="1024" height="784" alt="Duas avaliações: modelos usam exemplos de teste para medir erro, imitação e calibração; políticas dirigem os mesmos 20 dias para medir pontualidade, atraso, tempo e distância. As métricas são agregadas e salvas com configuração e hashes."></div><figcaption><span>Qualidade do modelo e resultado operacional ficam separados.</span><a href="../assets/fluxos/avaliacao.svg">Ampliar fluxograma</a><a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/docs/fluxos/avaliacao.mmd">Fonte Mermaid</a></figcaption></figure>
+          <div class="table-scroll"><table><caption>Entregas no prazo nos mesmos 20 dias, com 400 entregadores</caption><thead><tr><th scope="col">Política</th><th scope="col">Média</th><th scope="col">Desvio entre dias</th></tr></thead><tbody><tr><td>B0</td><td>78,6%</td><td>4,1 p.p.</td></tr><tr><td>B1</td><td>80,6%</td><td>3,2 p.p.</td></tr><tr><td>B1+</td><td>91,2%</td><td>2,4 p.p.</td></tr><tr><td>Jev linear</td><td>91,3%</td><td>2,5 p.p.</td></tr><tr><td>Jev rede</td><td>91,0%</td><td>2,5 p.p.</td></tr><tr><td>B2, privilegiado</td><td>93,8%</td><td>1,8 p.p.</td></tr></tbody></table></div>
+          <p style="margin-top:20px">Cada política recebeu <strong>106.401 pedidos</strong>: 105.511 foram entregues e 890 ficaram sem entrega. A pontualidade considera os entregues. O desvio entre dias não é intervalo de confiança.</p>
+          <p>B1+ melhora 10,63 pontos percentuais sobre B1, com melhora nos 20 dias comparados. Jev linear fica próximo de B1+. A rede imita melhor o professor, mas não melhora a pontualidade da frota.</p>
+          <aside class="note"><p><strong>A ablação de preparo inclui a margem de saída.</strong> As variantes com preparo aprendido também passam de 150 para 30 s e usam o quantil 0,6. Não foi feito aqui um teste adicional mantendo a margem fixa para atribuir todo o ganho exclusivamente ao modelo.</p></aside>
+          <p class="sources">Fontes: <a href="../resultados.json">métricas de cada dia, configuração e hashes</a>, <a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/scripts/plot_results.py">coleta e gráficos</a> e <a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/docs/metodologia.md">metodologia completa</a>.</p>
+        </section>
+
+        <section id="modelos" class="chapter" aria-labelledby="artifacts-title">
+          <h2 id="artifacts-title">Sim, isso já virou modelos.</h2>
+          <p>O treino produziu quatro arquivos NPZ, com pesos aprendidos, normalizações e metadados. São artefatos de inferência; não guardam todo o estado de Adam e dos sorteios para retomar o treino exatamente do mesmo ponto.</p>
+          <div class="table-scroll"><table><thead><tr><th scope="col">Arquivo</th><th scope="col">Parâmetros</th><th scope="col">O que acompanha os pesos</th></tr></thead><tbody><tr><td class="artifact"><a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/models/prep.npz">prep.npz</a></td><td>8.354</td><td>Embedding e tipos dos 600 restaurantes, centralização do alvo e metadados. Arquivo de 33.721 B.</td></tr><tr><td class="artifact"><a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/models/eta.npz">eta.npz</a></td><td>5.185</td><td>Centro das posições, centralização do alvo e metadados. Arquivo de 21.138 B.</td></tr><tr><td class="artifact"><a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/models/jev-linear.npz">jev-linear.npz</a></td><td>10</td><td>Normalização das nove features e metadados. Arquivo de 1.345 B.</td></tr><tr><td class="artifact"><a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/models/jev-mlp.npz">jev-mlp.npz</a></td><td>865</td><td>Normalização das features e metadados da rede. Arquivo de 5.365 B.</td></tr></tbody></table></div>
+          <p style="margin-top:20px">Os quatro arquivos somam 61.569 bytes. Os relatórios JSON ao lado deles contêm as métricas. Abrir os NPZ com <code>allow_pickle=False</code> confirma arrays numéricos e strings Unicode, incluindo metadados JSON, sem objetos Python serializados.</p>
+          <h3>Usar um modelo já treinado</h3>
+          <p>Este exemplo carrega o preparo e pede o quantil 0,6 ao meio-dia, sem chuva, para o índice 1 do mundo sintético publicado:</p>
+          <pre><code>from pathlib import Path
+import numpy as np
+from delivery_lab.learn.prep import PrepModel
+
+model = PrepModel.load(Path("models/prep.npz"))
+minutes = model.quantile_s(
+    restaurant=np.array([1]),
+    t_s=np.array([12 * 3600]),
+    rain=np.array([False]),
+    q=0.6,
+) / 60
+print(minutes[0])  # cerca de 12,7308 minutos</code></pre>
+          <p style="margin-top:18px">O exemplo usa os pesos existentes e foi executado sem retreino. O forward é NumPy, mas os módulos atuais ainda importam PyTorch; o ambiente documentado requer <code>uv sync --extra train</code>.</p>
+          <aside class="note"><p><strong>Os índices fazem parte do modelo.</strong> O restaurante 1 é um índice deste mundo sintético. Os pesos não são uma previsão pronta para qualquer restaurante ou outra cidade. Features, identidade dos restaurantes e distribuição precisam ser preservadas ou reconstruídas.</p></aside>
+          <p class="sources"><a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/models/README.md">Ficha dos modelos, hashes e exemplo de uso</a>.</p>
+        </section>
+
+        <section id="hugging-face" class="chapter" aria-labelledby="hf-title">
+          <h2 id="hf-title">E dá para publicar no Hugging Face?</h2>
+          <p><strong>Sim, como modelos customizados.</strong> O Hub pode guardar os quatro NPZ junto do código de carregamento, configuração e documentação. Eles não precisam ser convertidos em um modelo Transformers para serem compartilhados.</p>
+          <p>Para que outra pessoa consiga usá-los, o pacote precisa explicar a ordem das features, os IDs, as normalizações e a versão do código. A ficha dos modelos é um primeiro rascunho dessa documentação.</p>
+          <ol class="steps"><li><strong>Reunir os artefatos.</strong> Pesos, relatórios de avaliação, configuração, hashes e uma versão identificável do código.</li><li><strong>Documentar a inferência.</strong> Dependências, entrada/saída de cada modelo e um exemplo executável. Os NPZ sozinhos não formam uma API de uso.</li><li><strong>Escrever a model card.</strong> Tarefas, dados sintéticos, splits, métricas, usos, limites e licença do pacote, distinguindo código MIT e dados derivados do OSM sob ODbL.</li><li><strong>Publicar um repositório de modelos.</strong> Depois, uma demonstração ou serviço de inferência pode ser preparado como entrega separada.</li></ol>
+          <p class="status-note">Esta etapa documenta a possibilidade. Nenhum upload para o Hugging Face foi feito nesta tarefa.</p>
+          <div class="split"><div><h3>Repositório de modelos</h3><p>Armazena arquivos e model card para consulta e download. É a publicação adequada aos pesos já produzidos.</p></div><div><h3>Demonstração ou API</h3><p>Executa o modelo para receber uma entrada e devolver uma previsão. Guardar NPZ no Hub não cria esse serviço automaticamente.</p></div></div>
+          <p class="sources">Documentação oficial: <a href="https://huggingface.co/docs/hub/models-uploading">publicar modelos customizados</a>, <a href="https://huggingface.co/docs/hub/model-cards">model cards</a> e <a href="https://huggingface.co/docs/huggingface_hub/guides/download">baixar arquivos para usar em código</a>.</p>
+        </section>
+
+        <section id="site" class="chapter" aria-labelledby="site-title">
+          <h2 id="site-title">O navegador mostra uma gravação.</h2>
+          <p>O simulador grava horários, trechos, pedidos e decisões em JSON. A demo publicada recebe um snapshot congelado do <strong>dia 101</strong>. React e canvas reconstroem a posição dos entregadores conforme o relógio avança.</p>
+          <p>O navegador não treina os modelos nem faz uma nova inferência a cada clique. Ele lê o replay das cinco políticas. Os gráficos resumem 20 dias de avaliação; o calor é outra agregação, com média de 30 dias e células de 250 m.</p>
+          <p>O build do GitHub Pages valida os hashes e descompacta os sete JSONs da demo. Assim, abrir o site não depende de baixar o OSM novamente ou executar o treino.</p>
+          <p class="sources"><a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/src/delivery_lab/replay.py">Geração do replay</a> · <a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/web/src/replay.ts">Leitura na interface</a> · <a href="../dados/manifest.json">Manifesto público</a> · <a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/scripts/build_pages.py">Build do site</a>.</p>
+        </section>
+
+        <section id="construcao" class="chapter" aria-labelledby="history-title">
+          <h2 id="history-title">Em que ordem chegamos até aqui.</h2>
+          <p>Os fluxogramas mostram o funcionamento atual. A ordem de construção do laboratório foi esta:</p>
+          <ol class="history"><li><span class="step-name">Passo 1</span><div><strong>Cidade e mapa</strong>Recorte OSM, grafo dirigido e caminhos mínimos.</div></li><li><span class="step-name">Passo 2</span><div><strong>Mundo sintético</strong>Restaurantes, pedidos, preparo, trânsito, frota e turnos.</div></li><li><span class="step-name">Passo 3</span><div><strong>Simulador e B0</strong>Eventos, capacidade, coleta/entrega e uma primeira régua.</div></li><li><span class="step-name">Passo 4</span><div><strong>B1 e B2</strong>Planejador clássico, referência privilegiada e ablações.</div></li><li><span class="step-name">Passo 5</span><div><strong>Preparo, ETA e B1+</strong>Modelos de tempo treinados e integrados ao planejador.</div></li><li><span class="step-name">Passo 6</span><div><strong>Jev</strong>Imitação da próxima parada, versões linear/rede e explicação dos fatores.</div></li><li class="future"><span class="step-name">Passo 7</span><div><strong>Oferta e aceite - ainda não implementado</strong>Experimento futuro para modelar a resposta do entregador a uma oferta.</div></li><li><span class="step-name">Passo 8</span><div><strong>Portfólio e documentação</strong>README, resultados, gráficos, capturas, página pública e este guia do experimento.</div></li></ol>
+          <aside class="note"><p><strong>Limite da conclusão:</strong> são dados limpos e sintéticos, uma cidade e um mundo principal. Antes de levar os pesos para uma operação real, é preciso variar cenários e validar em outra distribuição. Oferta/aceite e a próxima evolução da UI são etapas posteriores.</p></aside>
+        </section>
+
+        <div class="closing"><a href="../">Voltar à visão geral</a><a href="../mapa/?entregador=162">Inspecionar uma decisão</a><a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/docs/como-funciona.md">Versão em Markdown</a><a href="https://github.com/Juan-Severiano/delivery-routing-lab">Código do projeto</a></div>
+      </div>
+    </div>
+  </main>
+  <footer class="site-footer"><div class="wrap footer-inner"><p><a href="https://github.com/Juan-Severiano">Juan Severiano</a> - delivery-routing-lab, 2026.</p><p>Ruas: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>. Dados sob <a href="https://opendatacommons.org/licenses/odbl/1-0/">ODbL 1.0</a>; código <a href="https://github.com/Juan-Severiano/delivery-routing-lab/blob/main/LICENSE">MIT</a>.</p></div></footer>
+</body>
+</html>

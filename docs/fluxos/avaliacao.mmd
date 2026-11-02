@@ -1,0 +1,19 @@
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Arial, sans-serif","fontSize":"18px","primaryColor":"#F8FBFD","primaryTextColor":"#193341","primaryBorderColor":"#CBD6DD","lineColor":"#193341","secondaryColor":"#E9F0F5","tertiaryColor":"#E9F0F5","edgeLabelBackground":"#F8FBFD"},"flowchart":{"htmlLabels":false,"curve":"linear","nodeSpacing":35,"rankSpacing":42,"wrappingWidth":280},"deterministicIds":true,"deterministicIDSeed":"delivery-avaliacao","fontFamily":"Arial, sans-serif","htmlLabels":false,"look":"classic","markdownAutoWrap":false,"themeCSS":".node .label-container { filter: none !important; }"}}%%
+flowchart TB
+  accTitle: Duas avaliações: o modelo e a frota
+  accDescr: O teste usa os dias 101 a 120, separados do ajuste e treino. Uma avaliação mede erro das previsões, imitação do B2 e calibração. A outra deixa cada política conduzir a frota e mede pontualidade, atraso, tempo e distância. Resultados por dia viram JSON e gráficos. Melhor imitação não garante melhor operação; um replay de um dia é apresentado à parte.
+  TEST["Teste separado<br/>Dias 101 a 120<br/>Mesmo mundo, pedidos e frota"] --> OFF["Avaliação dos modelos<br/>Em exemplos reservados"]
+  TEST --> SIM["Avaliação operacional<br/>Cada política conduz a frota"]
+  OFF --> ERR["Erros de preparo e ETA<br/>Preparo: calibração dos quantis"]
+  OFF --> IMI["Jev contra o B2<br/>Acerto de imitação, NLL e ECE"]
+  ERR --> MO["models/*.json<br/>Métricas offline dos modelos"]
+  IMI --> MO
+  SIM --> OP["Prazo, atraso, tempo e distância<br/>Pedidos sem entrega contados à parte"]
+  OP --> SNAP["docs/resultados.json<br/>Métricas de cada dia"]
+  SNAP --> PLOT["Gráficos reproduzíveis<br/>Média e desvio entre dias"]
+  IMI -. "não implica ganho" .-> OP
+  SIM -. "exibição separada" .-> DEMO["Replay do dia 101<br/>Mapa público para inspecionar"]
+  classDef test fill:#E9F0F5,color:#193341,stroke:#193341,stroke-width:2px
+  classDef result fill:#2452D6,color:#F8FBFD,stroke:#2452D6
+  class TEST test
+  class MO,SNAP result

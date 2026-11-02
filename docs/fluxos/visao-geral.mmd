@@ -1,0 +1,16 @@
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Arial, sans-serif","fontSize":"18px","primaryColor":"#F8FBFD","primaryTextColor":"#193341","primaryBorderColor":"#CBD6DD","lineColor":"#193341","secondaryColor":"#E9F0F5","tertiaryColor":"#E9F0F5","edgeLabelBackground":"#F8FBFD"},"flowchart":{"htmlLabels":false,"curve":"linear","nodeSpacing":35,"rankSpacing":44,"wrappingWidth":280},"deterministicIds":true,"deterministicIDSeed":"delivery-visao-geral","fontFamily":"Arial, sans-serif","htmlLabels":false,"look":"classic","markdownAutoWrap":false,"themeCSS":".node .label-container { filter: none !important; }"}}%%
+flowchart TB
+  accTitle: Da malha de Itapipoca ao replay público
+  accDescr: As ruas do OpenStreetMap viram grafo e caminhos mínimos. O mundo sintético e a política alimentam o simulador por eventos. Modelos são treinados offline e usados pela política. A simulação produz métricas e um replay JSON; o site apenas reproduz os arquivos, sem treinar ou decidir rotas no navegador.
+  OSM["Ruas do OpenStreetMap"] --> G["Grafo dirigido<br/>e caminhos mínimos"]
+  W["Mundo por semente<br/>Pedidos, preparo, trânsito e frota"] --> S["Simulador por eventos<br/>Executa o dia sintético"]
+  G --> S
+  M["Treino offline<br/>Quatro modelos salvos em .npz"] --> P["Política escolhida<br/>B0, B1, B1+, Jev ou B2"]
+  P --> S
+  S --> E["Avaliação<br/>Métricas por dia e gráficos"]
+  S --> R["Replay JSON<br/>Posições, paradas e decisões"]
+  R --> UI["Mapa no navegador<br/>Lê e reproduz os arquivos"]
+  classDef model fill:#2452D6,color:#F8FBFD,stroke:#2452D6
+  classDef main fill:#E9F0F5,color:#193341,stroke:#193341,stroke-width:2px
+  class M model
+  class S main

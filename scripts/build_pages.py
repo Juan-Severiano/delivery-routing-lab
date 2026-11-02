@@ -46,6 +46,9 @@ def build(output: Path) -> None:
         site = Path(temporary) / "site"
         site.mkdir()
         shutil.copy2(ROOT / "docs/delivery-routing-lab.html", site / "index.html")
+        guide = site / "como-funciona"
+        guide.mkdir()
+        shutil.copy2(ROOT / "docs/como-funciona/index.html", guide / "index.html")
         shutil.copytree(ROOT / "docs/assets", site / "assets")
         shutil.copy2(ROOT / "docs/resultados.json", site / "resultados.json")
         shutil.copytree(ROOT / "web/dist", site / "mapa")
@@ -74,7 +77,8 @@ def build(output: Path) -> None:
         (site / "sitemap.xml").write_text(
             '<?xml version="1.0" encoding="UTF-8"?>\n'
             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
-            f"<url><loc>{SITE_URL}</loc></url><url><loc>{SITE_URL}mapa/</loc></url></urlset>\n",
+            f"<url><loc>{SITE_URL}</loc></url><url><loc>{SITE_URL}como-funciona/</loc></url>"
+            f"<url><loc>{SITE_URL}mapa/</loc></url></urlset>\n",
             encoding="utf-8",
         )
         if output.exists():

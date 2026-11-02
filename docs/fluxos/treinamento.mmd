@@ -1,0 +1,20 @@
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Arial, sans-serif","fontSize":"18px","primaryColor":"#F8FBFD","primaryTextColor":"#193341","primaryBorderColor":"#CBD6DD","lineColor":"#193341","secondaryColor":"#E9F0F5","tertiaryColor":"#E9F0F5","edgeLabelBackground":"#F8FBFD"},"flowchart":{"htmlLabels":false,"curve":"linear","nodeSpacing":35,"rankSpacing":42,"wrappingWidth":280},"deterministicIds":true,"deterministicIDSeed":"delivery-treinamento","fontFamily":"Arial, sans-serif","htmlLabels":false,"look":"classic","markdownAutoWrap":false,"themeCSS":".node .label-container { filter: none !important; }"}}%%
+flowchart TB
+  accTitle: Como os quatro modelos são treinados
+  accDescr: Preparo aprende a distribuição do log do tempo observado a partir de restaurante, tipo, hora e chuva. ETA usa trechos percorridos pelo B0 e aprende o log da razão entre tempo real e tempo livre. Os dois modelos fornecem previsões para as features de nove fatores do Jev. B2 fornece o rótulo de próxima parada; linear e MLP aprendem por entropia cruzada do softmax entre candidatas. O mesmo loop usa autograd, Adam próprio e a melhor época da validação. Não há ajuste por temperatura.
+  PD["Pedidos sintéticos<br/>Restaurante, tipo, hora e chuva<br/>Alvo: log do preparo observado"] --> PT["Rede de preparo<br/>Perda gaussiana no log<br/>Aprende média e dispersão"]
+  ED["Trechos percorridos pelo B0<br/>Hora, posições, chuva e tempo livre<br/>Alvo: log do tempo real / livre"] --> ET["Rede de ETA<br/>Erro quadrático no log da razão"]
+  PT --> PM["prep.npz"]
+  ET --> EM["eta.npz"]
+  PM --> JV["Visão da plataforma<br/>Nove fatores por candidata<br/>com preparo e ETA previstos"]
+  EM --> JV
+  B2["B2 como professor<br/>Vê preparo e trânsito verdadeiros<br/>Rótulo: a próxima parada escolhida"] --> JV
+  JV --> JT["Jev linear e Jev rede<br/>Pontuação por candidata + softmax<br/>Entropia cruzada contra a escolha B2"]
+  JT --> JM["jev-linear.npz<br/>jev-mlp.npz"]
+  JT -. "regra comum do treino" .-> LOOP["Tensores e autograd do PyTorch<br/>Adam e laço próprios<br/>Melhor época na validação"]
+  classDef model fill:#2452D6,color:#F8FBFD,stroke:#2452D6
+  classDef teacher fill:#F8FBFD,color:#B44C24,stroke:#B44C24
+  classDef note fill:#E9F0F5,color:#193341,stroke:#CBD6DD
+  class PM,EM,JM model
+  class B2 teacher
+  class LOOP note
