@@ -70,7 +70,10 @@ export function App() {
   const [clock, setClock] = useState(12 * 3600 + 30 * 60);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(300);
-  const [selected, setSelected] = useState<number | null>(null);
+  const [selected, setSelected] = useState<number | null>(() => {
+    const courier = Number(new URLSearchParams(window.location.search).get("entregador"));
+    return Number.isInteger(courier) && courier >= 1 && courier <= 400 ? courier - 1 : null;
+  });
   const [layers, setLayers] = useState<Layers>({ heat: false, restaurants: true, orders: true, couriers: true });
   const buffer = useRef<Frame | null>(null);
 
@@ -115,7 +118,8 @@ export function App() {
     // o buffer é reaproveitado; o relógio é o que muda
   }, [replay, city, clock]);
 
-  const legIndex = selected !== null && frame ? frame.leg[selected] : -1;
+  const selectedCourier = selected !== null && frame && selected < frame.mode.length ? selected : null;
+  const legIndex = selectedCourier !== null && frame ? frame.leg[selectedCourier] : -1;
   const decision = useMemo(() => {
     const d = replay?.payload.decisions;
     if (!replay || !world || !d || legIndex < 0) return null;
@@ -252,8 +256,8 @@ export function App() {
           </section>
         )}
 
-        {replay && selected !== null && frame && (
-          <CourierPanel replay={replay} frame={frame} courier={selected} clock={clock} onClose={() => setSelected(null)} />
+        {replay && selectedCourier !== null && frame && (
+          <CourierPanel replay={replay} frame={frame} courier={selectedCourier} clock={clock} onClose={() => setSelected(null)} />
         )}
         {decision && replay && <DecisionPanel decision={decision} kinds={replay.payload.kinds} />}
 
@@ -454,7 +458,7 @@ export function App() {
             frame={frame}
             clock={clock}
             layers={layers}
-            selected={selected}
+            selected={selectedCourier}
             onSelect={setSelected}
             marks={marks}
           />
